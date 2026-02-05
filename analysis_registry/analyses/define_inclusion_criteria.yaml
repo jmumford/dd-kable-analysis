@@ -1,0 +1,26 @@
+id: define_inclusion_criteria
+name: Generates inclusion/exclusion files for inputs in time series analysis.
+stage: preprocessing
+description: >
+  Working from inclusion_subjects_120426.csv, the notebook in this directory
+  generates an inclusion (DD_Kable/subject_lists/initial_qa_pass_subjects_runs.csv)
+  and exclusion file (DD_Kable/subject_lists/initial_qa_fail_subjects_runs_reasons.csv).
+  The inclusion criteria are defined in the notebook and these are the subjects
+  and runs that should be included in time series analysis.
+code_dir: "analyses/define_inclusion_criteria"
+dependencies: []
+script_entry: null
+notebook_entry:
+  - "define_inclusion_criteria.ipynb"
+other_files: null
+results_files:
+  - "define_inclusion_criteria.ipynb"
+output_dir: "DD_Kable/subject_lists/"
+hypothesis: null
+conclusion: "125 subjects total (6 subjects with 2 runs, 17 with 3 runs, 102 with 4 runs)"
+notes: >
+  Omit a run that has >10% missingness, <10% or >90% choseAccept and/or no data in csv.  
+  Omit a subject if they have fewer than 2 good runs out of 4.
+status: "completed"
+last_updated: "2026-02-05"
+authors: ["Jeanette Mumford"]

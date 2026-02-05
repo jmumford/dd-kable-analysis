@@ -1,0 +1,21 @@
+id: behavioral_data_exploration
+name: RT distributions and other explorations
+stage: preprocessing
+description: >
+  This is where any exploration of the behavioral data is done.  I started it with RT distributions (within-subject and within-runs across subjects).
+code_dir: "analyses/behavioral_data_exploration"
+dependencies: []
+script_entry: null
+notebook_entry:
+  - "response_time_exploration.ipynb"
+other_files: null
+results_files:
+  - "response_time_exploration.ipynb"
+output_dir: null
+hypothesis: null
+conclusion: "Nothing unusual found (that I'm aware of)"
+notes: >
+  Let me know if there are other ways I should assess RT or the other measures.
+status: "completed"
+last_updated: "2026-02-05"
+authors: ["Jeanette Mumford"]
