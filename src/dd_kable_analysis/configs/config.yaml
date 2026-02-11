@@ -21,3 +21,8 @@ masks_dir: /oak/stanford/groups/russpold/users/buckholtz/DD_Kable/derivatives/ma
 # ROI mask location
 tr: 3
 smoothing_fwhm: 6
+confounds:
+  patterns:
+    - "^cosine\\d{2}$"
+    - "^rot_[xyz]$"
+    - "^rot_[xyz]_derivative1$"

@@ -2,9 +2,10 @@
 Minimal Config Loader for ddkable
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Pattern, Union
 
 import yaml
 
@@ -21,6 +22,15 @@ def _to_path(v: Union[str, Path]) -> Path:
 # -------------------------
 #  CONFIG DATACLASS
 # -------------------------
+@dataclass
+class ConfoundsConfig:
+    patterns: list[str]
+    compiled_patterns: list[Pattern[str]] = field(init=False)
+
+    def __post_init__(self) -> None:
+        if not self.patterns:
+            raise ConfigError('ConfoundsConfig.patterns cannot be empty')
+        self.compiled_patterns = [re.compile(p) for p in self.patterns]
 
 
 @dataclass
@@ -38,6 +48,9 @@ class Config:
     behav_func_glob: str
     behav_data_suffix: str
     masks_dir: Path
+
+    confounds: ConfoundsConfig
+
     tr: float = 3
     smoothing_fwhm: float = 6
 
@@ -128,6 +141,9 @@ def load_config(config_file: Union[str, Path] = None) -> Config:
     for float_key in ['tr', 'smoothing_fwhm']:
         if float_key in data:
             data[float_key] = float(data[float_key])
+
+    if 'confounds' in data:
+        data['confounds'] = ConfoundsConfig(**data['confounds'])
 
     return Config(**data)
 
