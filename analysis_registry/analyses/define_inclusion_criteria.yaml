@@ -9,7 +9,8 @@ description: >
   and runs that should be included in time series analysis.
 code_dir: "analyses/define_inclusion_criteria"
 dependencies: []
-script_entry: null
+script_entry:
+  - "define_inclusion_criteria_utils.py"
 notebook_entry:
   - "define_inclusion_criteria.ipynb"
 other_files: null
