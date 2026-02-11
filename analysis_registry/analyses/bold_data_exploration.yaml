@@ -1,0 +1,23 @@
+id: bold_data_exploration
+name: Explore BOLD data for oddities
+stage: preprocessing
+description: >
+  Initiated to verify that there did not appear to be nonsteady state scans in the BOLD data.
+code_dir: "analyses/bold_data_exploration"
+dependencies: []
+script_entry: null
+notebook_entry:
+  - "check_scanner_warmup_volumes.ipynb"
+other_files: null
+results_files:
+  - "./figures/nonsteady_state_scans_per_run.pdf"
+output_dir: null
+hypothesis: null
+conclusion: "No nonsteady state scans detected in the BOLD data."
+notes: >
+  Using the non_steady_state_outlier columns of the fmriprep confound output files, I checked how many nonstead state
+  scans occurred for each subject/run and found that it wasn't common and typically if a scan was flagged it was only the first TR.  
+  Of the ~420 runs only around 50-60 had any TRs flagged.  Figures summarize findings in notebook.
+status: "complete"
+last_updated: "2026-02-11"
+authors: ["Jeanette Mumford"]

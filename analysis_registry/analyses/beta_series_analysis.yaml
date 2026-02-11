@@ -1,0 +1,23 @@
+id: beta_series_analysis
+name: Develop and assess beta series analysis pipeline for time series data.
+stage: time series
+description: >
+  Set up design matrices and contrasts for beta series analysis, and run the analysis on the included subjects and runs. 
+  Assess the results for outliers.
+code_dir: "analyses/beta_series_analysis"
+dependencies: []
+script_entry: null
+notebook_entry:
+  - "beta_series_analysis_code_dev.ipynb"
+  - "qa_design_matrices.ipynb"
+other_files: null
+results_files:
+  - "/figures/design_matrix_assessment.pdf"
+output_dir: null
+hypothesis: null
+conclusion: "Beta series model has stable VIFs across trial estimates."
+notes: >
+  TBD
+status: "in progress"
+last_updated: "2026-02-11"
+authors: ["Jeanette Mumford"]
