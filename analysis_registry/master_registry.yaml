@@ -63,7 +63,7 @@
   - check_scanner_warmup_volumes.ipynb
   other_files: null
   results_files:
-  - ./figures/nonsteady_state_scans_per_run.pdf
+  - check_scanner_warmup_volumes.ipynb
   output_dir: null
   hypothesis: null
   conclusion: No nonsteady state scans detected in the BOLD data.
