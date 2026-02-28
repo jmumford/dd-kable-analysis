@@ -9,6 +9,7 @@ dependencies: []
 script_entry:
   - "run_beta_series.py"
   - "submit_beta_series.sh"
+  - "qa_output.py"
 notebook_entry:
   - "beta_series_analysis_code_dev.ipynb"
   - "qa_design_matrices.ipynb"
@@ -16,6 +17,7 @@ notebook_entry:
 other_files: null
 results_files:
   - "/figures/design_matrix_assessment.pdf"
+  - "subject_lists/vif_gt_5.csv"
   - "beta_series_analysis_code_dev.ipynb"
   - "qa_design_matrices.ipynb"
   - "qa_analysis_output.ipynb"
@@ -24,6 +26,6 @@ hypothesis: null
 conclusion: "Beta series model has stable VIFs across trial estimates."
 notes: >
   TBD
-status: "in progress"
-last_updated: "2026-02-11"
+status: "completed"
+last_updated: "2026-02-28"
 authors: ["Jeanette Mumford"]

@@ -78,6 +78,31 @@ def render_md_list(label, value):
     return f'**{label}:** {value}<br>'
 
 
+def build_results_links(entry):
+    """Build HTML links for results files using code_dir when available."""
+    result_files = entry.get('results_files') or []
+    if not result_files:
+        return 'None'
+
+    code_dir = entry.get('code_dir')
+    fallback_id = (entry.get('id') or '').replace(' ', '_')
+
+    links = []
+    for rf in result_files:
+        rf_str = str(rf)
+        if rf_str.startswith('http://') or rf_str.startswith('https://'):
+            href = rf_str
+        else:
+            rel_path = rf_str.lstrip('/')
+            if code_dir:
+                href = f'../{code_dir}/{rel_path}'
+            else:
+                href = f'../analyses/{fallback_id}/{rel_path}'
+        links.append(f'<a href="{href}">{rf_str}</a>')
+
+    return ', '.join(links)
+
+
 def write_markdown_summary(entries, output_file: Path):
     md_lines = ['# Master Analysis Registry\n']
 
@@ -105,16 +130,7 @@ def write_markdown_summary(entries, output_file: Path):
             pretty_id = e.get('id', 'None').replace('_', ' ')
 
             # Results files
-            results_files = e.get('results_files') or []
-            if results_files:
-                links = ', '.join(
-                    [
-                        f'<a href="../analyses/{pretty_id.replace(" ", "_")}/{rf}">{rf}</a>'
-                        for rf in results_files
-                    ]
-                )
-            else:
-                links = 'None'
+            links = build_results_links(e)
 
             md_lines.append(
                 f'<tr><td>{pretty_id}</td><td>{desc}</td><td>{status}</td><td>{links}</td><td>{notes}</td></tr>'
@@ -152,17 +168,7 @@ def write_markdown_summary(entries, output_file: Path):
             md_lines.append(
                 f'**Output Directory:** {stringify_entry(e.get("output_dir"))}<br>'
             )
-            result_files = e.get('results_files') or []
-            if result_files:
-                rf_links = ', '.join(
-                    [
-                        f'<a href="../analyses/{pretty_id.replace(" ", "_")}/{rf}">{rf}</a>'
-                        for rf in result_files
-                    ]
-                )
-            else:
-                rf_links = 'None'
-            md_lines.append(f'**Results Files:** {rf_links}<br>')
+            md_lines.append(f'**Results Files:** {build_results_links(e)}<br>')
 
             md_lines.append(
                 f'**Hypothesis:** {clean_text_field(e.get("hypothesis"))}<br>'

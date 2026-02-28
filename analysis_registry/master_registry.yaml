@@ -32,21 +32,29 @@
     '
   code_dir: analyses/beta_series_analysis
   dependencies: []
-  script_entry: null
+  script_entry:
+  - run_beta_series.py
+  - submit_beta_series.sh
+  - qa_output.py
   notebook_entry:
   - beta_series_analysis_code_dev.ipynb
   - qa_design_matrices.ipynb
+  - qa_analysis_output.ipynb
   other_files: null
   results_files:
   - /figures/design_matrix_assessment.pdf
+  - subject_lists/vif_gt_5.csv
+  - beta_series_analysis_code_dev.ipynb
+  - qa_design_matrices.ipynb
+  - qa_analysis_output.ipynb
   output_dir: null
   hypothesis: null
   conclusion: Beta series model has stable VIFs across trial estimates.
   notes: 'TBD
 
     '
-  status: in progress
-  last_updated: '2026-02-11'
+  status: completed
+  last_updated: '2026-02-28'
   authors:
   - Jeanette Mumford
 - id: bold_data_exploration
@@ -107,5 +115,122 @@
     '
   status: completed
   last_updated: '2026-02-05'
+  authors:
+  - Jeanette Mumford
+- id: group_mask
+  name: Create group mask and individual mask QC
+  stage: preprocessing
+  description: 'Generate a group mask and create individual mask PDF summaries for
+    QC.
+
+    '
+  code_dir: analyses/group_mask
+  dependencies: []
+  script_entry:
+  - make_individual_masks_pdf.py
+  - run_make_individual_masks_pdf.batch
+  notebook_entry:
+  - make_group_mask.ipynb
+  other_files: null
+  results_files:
+  - make_group_mask.ipynb
+  - '.../DD_Kable/subject_lists/initial_qa_pass_and_mask_pass_subjects_runs.csv'
+  - '.../DD_Kable/derivatives/masks/assess_subject_bold_dropout/group_mask_intersection_30pct.nii.gz'
+  - '.../DD_Kable/derivatives/masks/assess_subject_bold_dropout/mask_and_mean_QA.pdf'
+  output_dir:
+  - '.../DD_Kable/subject_lists'
+  - '.../DD_Kable/derivatives/masks/assess_subject_bold_dropout'
+  hypothesis: null
+  conclusion: null
+  notes: 'Use the group_mask_intersection_30pct.nii.gz for any group analyses.
+
+    '
+  status: completed
+  last_updated: '2026-02-28'
+  authors:
+  - Jeanette Mumford
+- id: ll_ss_group_model_comparison
+  name: LL-SS group model comparison
+  stage: group
+  description: 'Group-level comparisons for LL vs SS effects using summary outputs
+    and QA notebooks.
+
+    '
+  code_dir: analyses/ll_ss_group_model_comparison
+  dependencies: []
+  script_entry: null
+  notebook_entry:
+  - accept_minus_reject_individual_run_comparison.ipynb
+  - accept_reject_group_comparison.ipynb
+  other_files: null
+  results_files:
+  - accept_minus_reject_individual_run_comparison.ipynb
+  - accept_reject_group_comparison.ipynb
+  output_dir: null
+  hypothesis: null
+  conclusion: null
+  notes: 'TBD
+
+    '
+  status: in progress
+  last_updated: '2026-02-13'
+  authors:
+  - Jeanette Mumford
+- id: mvpa_value_decoding_josh_rois
+  name: MVPA value decoding (Josh ROIs)
+  stage: time series and group
+  description: 'MVPA value decoding using Josh ROIs, including data prep and aggregated
+    results.
+
+    '
+  code_dir: analyses/mvpa_value_decoding/mvpa_josh_rois
+  dependencies: []
+  script_entry:
+  - run_josh_rois_subject.py
+  - submit_run_josh_rois.sh
+  notebook_entry:
+  - mvpa_josh_rois_prep.ipynb
+  - mvpa_josh_rois_aggregate_results.ipynb
+  other_files: null
+  results_files:
+  - mvpa_josh_rois_prep.ipynb
+  - mvpa_josh_rois_aggregate_results.ipynb
+  output_dir: null
+  hypothesis: null
+  conclusion: null
+  notes: 'TBD
+
+    '
+  status: in progress
+  last_updated: '2026-02-28'
+  authors:
+  - Jeanette Mumford
+- id: traditional_model_analysis
+  name: Develop and assess traditional model pipeline for time series data.
+  stage: time series
+  description: 'Set up design matrices and contrasts for the traditional model, and
+    run the analysis on the included subjects and runs. Assess the results for outliers.
+
+    '
+  code_dir: analyses/traditional_model_analysis
+  dependencies: []
+  script_entry:
+  - run_traditional_model.py
+  - submit_traditional_model.sh
+  notebook_entry:
+  - model_code_dev.ipynb
+  - qa_analysis_output.ipynb
+  other_files: null
+  results_files:
+  - model_code_dev.ipynb
+  - qa_analysis_output.ipynb
+  output_dir: null
+  hypothesis: null
+  conclusion: null
+  notes: 'TBD
+
+    '
+  status: in progress
+  last_updated: '2026-02-13'
   authors:
   - Jeanette Mumford

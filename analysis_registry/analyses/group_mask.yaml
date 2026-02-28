@@ -1,0 +1,28 @@
+id: group_mask
+name: Create group mask and individual mask QC
+stage: preprocessing
+description: >
+  Generate a group mask and create individual mask PDF summaries for QC.
+code_dir: "analyses/group_mask"
+dependencies: []
+script_entry:
+  - "make_individual_masks_pdf.py"
+  - "run_make_individual_masks_pdf.batch"
+notebook_entry:
+  - "make_group_mask.ipynb"
+other_files: null
+results_files:
+  - "make_group_mask.ipynb"
+  - ".../DD_Kable/subject_lists/initial_qa_pass_and_mask_pass_subjects_runs.csv"
+  - ".../DD_Kable/derivatives/masks/assess_subject_bold_dropout/group_mask_intersection_30pct.nii.gz"
+  - ".../DD_Kable/derivatives/masks/assess_subject_bold_dropout/mask_and_mean_QA.pdf"
+output_dir:
+  - ".../DD_Kable/subject_lists"
+  - ".../DD_Kable/derivatives/masks/assess_subject_bold_dropout"
+hypothesis: null
+conclusion: null
+notes: >
+  Use the group_mask_intersection_30pct.nii.gz for any group analyses.
+status: "completed"
+last_updated: "2026-02-28"
+authors: ["Jeanette Mumford"]
