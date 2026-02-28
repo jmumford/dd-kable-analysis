@@ -108,6 +108,9 @@ def make_design_matrix(
     behav_file = resolve_file(cfg, sub_id, 'scan1', run, 'behav')
     behav_data = load_tsv_data(behav_file)
 
+    # Drop the last trial (max onset): too close to the end for all runs/subjects.
+    behav_data = behav_data.loc[behav_data['onset'] != behav_data['onset'].max()].reset_index(drop=True)
+
     # --- Check for clipped trials ---
     clipped_mask = np.ceil(behav_data['onset']) >= frame_times[-1]
     n_clipped = clipped_mask.sum()
@@ -144,6 +147,95 @@ def make_design_matrix(
             # RT parametric regressor
             events_model_rt,
         ],
+        ignore_index=True,
+    )
+
+    # --- Make design matrix ---
+    desmat = make_first_level_design_matrix(
+        frame_times,
+        events=events_model,
+        hrf_model='spm',
+        drift_model=None,
+        add_regs=confounds.values,
+        add_reg_names=confounds.columns.tolist(),
+    )
+
+    return behav_data, events_model, desmat
+
+
+def make_design_matrix_traditional(
+    cfg: Config, sub_id: str, run: Union[int, str]
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+        Build a Nilearn first-level design matrix with:
+            - LL regressor
+            - SS regressor
+      - RT regressor (RT modeled as duration)
+      - 'no_response' regressor for trials with missing RT
+      - Confound regressors
+      - Intercept
+
+    Parameters
+    ----------
+    cfg : Config
+        Analysis configuration object containing TR and other settings.
+    sub_id : str
+        Subject identifier.
+    run : int or str
+        Run number.
+
+    Returns
+    -------
+    pd.DataFrame
+        behavioral data
+    pd.DataFrame
+        Events data used to make convolved regressors
+    pd.DataFrame
+        First-level design matrix.
+    """
+    # --- Frame times and confounds ---
+    frame_times = get_frametimes(cfg, sub_id, run)
+    confounds = get_confounds(cfg, sub_id, run)
+
+    # --- Load behavioral data ---
+    behav_file = resolve_file(cfg, sub_id, 'scan1', run, 'behav')
+    behav_data = load_tsv_data(behav_file)
+
+    # --- Check for clipped trials ---
+    clipped_mask = np.ceil(behav_data['onset']) >= frame_times[-1]
+    n_clipped = clipped_mask.sum()
+    if n_clipped > 0:
+        msg = f'❌ {n_clipped} trial{"s" if n_clipped > 1 else ""} for sub {sub_id}, run {run} are clipped.'
+        if n_clipped == 1:
+            print(msg + ' Removing the trial and continuing.')
+            behav_data = behav_data.loc[~clipped_mask].reset_index(drop=True)
+        else:
+            raise RuntimeError(msg + ' Cannot generate design matrix.')
+
+    # Remove clipped trials
+    behav_data = behav_data.loc[~clipped_mask].reset_index(drop=True)
+
+    # --- Trial type for traditional regressors ---
+    rt_missing_mask = behav_data['RT'].isna()
+
+    events_accept_reject = behav_data.loc[
+        ~rt_missing_mask, ['onset', 'duration', 'choseAccept']
+    ].copy()
+    events_accept_reject['trial_type'] = np.where(
+        events_accept_reject['choseAccept'] == 1, 'll', 'ss'
+    )
+    events_accept_reject = events_accept_reject.drop(columns=['choseAccept'])
+
+    events_no_response = behav_data.loc[rt_missing_mask, ['onset', 'duration']].copy()
+    events_no_response['trial_type'] = 'no_response'
+
+    events_model_rt = behav_data.loc[~rt_missing_mask, ['onset', 'RT']].copy()
+    events_model_rt['trial_type'] = 'rt'
+    events_model_rt.rename(columns={'RT': 'duration'}, inplace=True)
+
+    # --- Build events DataFrame ---
+    events_model = pd.concat(
+        [events_accept_reject, events_no_response, events_model_rt],
         ignore_index=True,
     )
 

@@ -36,10 +36,10 @@ def make_design_qa_figure(
     cfg: Config, sub_id: str, run: Union[int, str], show: bool = False
 ) -> plt.Figure:
     """
-    Generate QA figure for a subject/run showing:
-      1. Design matrix
-      2. Accept - Reject contrast
-      3. Contrast VIFs
+        Generate QA figure for a subject/run showing:
+            1. Design matrix
+            2. LL - SS contrast
+            3. Contrast VIFs
 
     Parameters
     ----------
@@ -65,12 +65,12 @@ def make_design_qa_figure(
     vifs = est_contrast_vifs(desmat, contrasts)
     vif_matrix = pd.DataFrame(vifs, index=[0]).round(1)
 
-    # --- Accept-Reject contrast ---
-    accept_reject_contrast = expression_to_contrast_vector(
-        contrasts['accept_minus_reject'], desmat.columns
+    # --- LL-SS contrast ---
+    ll_ss_contrast = expression_to_contrast_vector(
+        contrasts['ll_minus_ss'], desmat.columns
     )
     contrast_df = pd.DataFrame(
-        accept_reject_contrast.reshape(1, -1),
+        ll_ss_contrast.reshape(1, -1),
         columns=desmat.columns,
     ).round(2)
 
@@ -95,7 +95,7 @@ def make_design_qa_figure(
     )
     axes[0].set_title('Design Matrix')
 
-    # --- Accept-reject contrast heatmap ---
+    # --- LL-SS contrast heatmap ---
     sns.heatmap(
         contrast_df,
         annot=contrast_df.values,
@@ -108,7 +108,7 @@ def make_design_qa_figure(
         yticklabels=False,
         annot_kws={'fontsize': 6},
     )
-    axes[1].set_title('Accept - Reject Contrast')
+    axes[1].set_title('LL - SS Contrast')
 
     # --- VIF heatmap with color mapping ---
     # sns.heatmap can't accept per-cell colors directly via cmap,

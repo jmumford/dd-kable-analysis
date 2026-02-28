@@ -5,9 +5,9 @@ import pandas as pd
 from dd_kable_analysis.config_loader import Config
 
 
-def make_accept_reject_contrast_string(behav_data: pd.DataFrame) -> str:
+def make_ll_minus_ss_contrast_string(behav_data: pd.DataFrame) -> str:
     """
-    Create a contrast string for accept vs. reject trials based on trial_type labels,
+    Create a contrast string for LL minus SS trials based on trial_type labels,
     omitting trials with missing responses ('no_response').
 
     Parameters
@@ -49,8 +49,8 @@ def make_beta_series_constrast_set(
     desmat: pd.DataFrame, behav_data: pd.DataFrame
 ) -> Dict[str, str]:
     """
-    Create the set of contrasts for the beta series model.  Generates a contrast for each
-      trial's beta as well as the accept - reject contrast.
+        Create the set of contrasts for the beta series model.  Generates a contrast for each
+            trial's beta as well as the ll_minus_ss contrast.
 
     Parameters
     ----------
@@ -71,6 +71,23 @@ def make_beta_series_constrast_set(
         col_name: col_name for col_name in desmat.columns if 'trial' in col_name
     }
 
-    accept_reject_contrast = make_accept_reject_contrast_string(behav_data)
-    contrasts['accept_minus_reject'] = accept_reject_contrast
+    ll_minus_ss_contrast = make_ll_minus_ss_contrast_string(behav_data)
+    contrasts['ll_minus_ss'] = ll_minus_ss_contrast
     return contrasts
+
+
+def make_traditional_contrast_set(desmat: pd.DataFrame) -> Dict[str, str]:
+    """
+    Create the set of contrasts for the traditional model (LL minus SS).
+
+    Parameters
+    ----------
+    desmat: pd.DataFrame
+        The design matrix used in the model (expects ll/ss columns).
+
+    Returns
+    -------
+    Dict[str, str]
+        A dictionary of contrasts for nilearn.
+    """
+    return {'ll_minus_ss': 'll - ss'}

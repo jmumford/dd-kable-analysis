@@ -1,0 +1,1471 @@
+::::::::::::::
+cache.py
+::::::::::::::
+from __future__ import annotations
+
+"""
+Caching utilities for MVPA.
+
+Purpose:
+- Avoid re-running NiftiMasker.transform (expensive NIfTI I/O) when doing many
+  permutation refits or repeated decoding runs.
+- Cache per-subject global X_all, y, groups, and atlas label vector.
+
+The cache is saved as a compressed NPZ file containing numpy arrays plus a
+minimal copy of df_used stored as column arrays.
+"""
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from dd_kable_analysis.mvpa.data import build_subject_behav_bold_df
+from dd_kable_analysis.mvpa.features import prepare_subject_for_atlas_mvpa
+
+
+@dataclass
+class SubjectMVPAFeatureCache:
+    """Loaded per-subject cached features for fast decoding/permutation tests."""
+
+    sub_id: str
+    X_all: np.ndarray  # float32 (n_trials, n_vox_global)
+    y: np.ndarray  # float32 (n_trials,)
+    groups: np.ndarray  # run labels as strings (n_trials,)
+    atlas_labels_vec: np.ndarray  # int32 (n_vox_global,)
+    df_used: pd.DataFrame  # minimal trial metadata corresponding to X_all rows
+
+
+def get_subject_cache_path(
+    cfg: Any,
+    sub_id: str,
+    *,
+    cache_root: str = 'mvpa_cache',
+    cache_tag: str = 'schaefer200_2mm_amount',
+    filename: str = 'prep_cache.npz',
+) -> Path:
+    """
+    Construct the path to the per-subject cache file.
+
+    Parameters
+    ----------
+    cfg
+        Config object; must have cfg.output_root.
+    sub_id
+        Subject ID.
+    cache_root
+        Top-level directory under cfg.output_root for MVPA caches.
+    cache_tag
+        Analysis identifier (e.g., atlas + resolution + target), used to separate caches.
+    filename
+        Cache filename.
+
+    Returns
+    -------
+    Path
+        Full path to the NPZ cache file.
+    """
+    return Path(cfg.output_root) / cache_root / cache_tag / f'sub-{sub_id}' / filename
+
+
+def save_subject_prep_cache(
+    cfg: Any,
+    sub_id: str,
+    *,
+    atlas_img: Any,
+    y_col: str = 'amount',
+    beta_col: str = 'beta_file',
+    group_col: str = 'run',
+    cache_root: str = 'mvpa_cache',
+    cache_tag: str = 'schaefer200_2mm_amount',
+    overwrite: bool = False,
+    verbose: bool = True,
+) -> Path:
+    """
+    Build and save a per-subject MVPA feature cache.
+
+    This runs the expensive feature extraction step (NiftiMasker.transform on all
+    trial beta images) once and saves the resulting arrays. Useful for permutation
+    tests where you want to refit many models with shuffled y.
+
+    Parameters
+    ----------
+    cfg
+        Config object.
+    sub_id
+        Subject ID.
+    atlas_img
+        Label atlas image (path or Nifti1Image). Used only to compute atlas_labels_vec
+        consistent with X_all voxel ordering.
+    y_col, beta_col, group_col
+        Column names used by the subject trial table and extraction.
+    cache_root, cache_tag
+        Where to write the cache.
+    overwrite
+        If True, overwrite an existing cache file.
+    verbose
+        Print status.
+
+    Returns
+    -------
+    Path
+        Path to the written NPZ file.
+    """
+    cache_path = get_subject_cache_path(
+        cfg, sub_id, cache_root=cache_root, cache_tag=cache_tag
+    )
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if cache_path.exists() and not overwrite:
+        if verbose:
+            print(f'[cache] exists, skipping: {cache_path}')
+        return cache_path
+
+    out = build_subject_behav_bold_df(cfg, sub_id=sub_id, verbose=verbose, strict=True)
+    prep = prepare_subject_for_atlas_mvpa(
+        out.behav_bold_df,
+        atlas_img=atlas_img,
+        cfg=cfg,
+        y_col=y_col,
+        beta_col=beta_col,
+        group_col=group_col,
+        standardize_X=False,
+        verbose=verbose,
+    )
+
+    # Save arrays (use compact dtypes)
+    X_all = np.asarray(prep.X_all, dtype=np.float32)
+    y = np.asarray(prep.y, dtype=np.float32)
+    groups = np.asarray(prep.groups).astype('U32')  # fixed-width unicode strings
+    atlas_labels_vec = np.asarray(prep.atlas_labels_vec, dtype=np.int32)
+
+    # df_used: keep only what you'll want later
+    df_used = prep.df_used.copy()
+    keep_cols = [
+        c
+        for c in ['trial_type', 'run', y_col, 'delay', 'choseAccept']
+        if c in df_used.columns
+    ]
+    df_used = df_used[keep_cols].reset_index(drop=True)
+
+    np.savez_compressed(
+        cache_path,
+        sub_id=str(sub_id),
+        X_all=X_all,
+        y=y,
+        groups=groups,
+        atlas_labels_vec=atlas_labels_vec,
+        df_cols=np.array(df_used.columns.tolist(), dtype='U32'),
+        **{f'df_{c}': np.asarray(df_used[c].to_numpy()) for c in df_used.columns},
+    )
+
+    if verbose:
+        print(
+            f'[cache] wrote: {cache_path} X_all={X_all.shape} labels={atlas_labels_vec.shape}'
+        )
+
+    return cache_path
+
+
+def load_subject_prep_cache(cache_path: str | Path) -> SubjectMVPAFeatureCache:
+    """
+    Load a previously saved per-subject MVPA feature cache.
+
+    Parameters
+    ----------
+    cache_path
+        Path to NPZ cache file.
+
+    Returns
+    -------
+    SubjectMVPAFeatureCache
+        Loaded cache object.
+    """
+    z = np.load(str(cache_path), allow_pickle=False)
+    sub_id = str(z['sub_id'])
+    X_all = z['X_all']
+    y = z['y']
+    groups = z['groups'].astype(str)
+    atlas_labels_vec = z['atlas_labels_vec']
+
+    cols = [str(c) for c in z['df_cols'].tolist()]
+    df_dict = {c: z[f'df_{c}'] for c in cols}
+    df_used = pd.DataFrame(df_dict)
+
+    return SubjectMVPAFeatureCache(
+        sub_id=sub_id,
+        X_all=X_all,
+        y=y,
+        groups=groups,
+        atlas_labels_vec=atlas_labels_vec,
+        df_used=df_used,
+    )
+
+
+def roi_to_cols_from_atlas_labels(
+    atlas_labels_vec: np.ndarray,
+    drop_label: int = 0,
+) -> dict[int, np.ndarray]:
+    """
+    Create ROI->column-index mapping from an atlas label vector.
+
+    Parameters
+    ----------
+    atlas_labels_vec
+        Vector of length n_vox_global giving atlas label per voxel/column.
+    drop_label
+        Background label value to exclude (usually 0).
+
+    Returns
+    -------
+    dict
+        Mapping from ROI integer label to numpy array of column indices.
+    """
+    labels = np.unique(atlas_labels_vec.astype(int))
+    labels = [int(l) for l in labels if int(l) != drop_label]
+    return {l: np.where(atlas_labels_vec == l)[0] for l in labels}
+::::::::::::::
+data.py
+::::::::::::::
+from __future__ import annotations
+
+"""
+Data assembly utilities for MVPA decoding.
+
+This module constructs a per-subject trial table that links:
+- behavioral/design-matrix trial rows
+- beta-series NIfTI files for each trial regressor
+- run labels for group-wise CV
+
+It also applies trial omissions (high-VIF trials, missing beta files) and
+enforces minimum runs/trials-per-run requirements.
+"""
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from dd_kable_analysis.tseries_model.design_matrix import make_design_matrix
+
+
+def load_initial_and_vif_tables(cfg: Any) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Load subject×run QA table and high-VIF trial omission table.
+
+    Returns
+    -------
+    initial_sub_run_df
+        DataFrame of QA-passed subject/run combinations.
+    high_vif_sub_run_df
+        DataFrame listing trials to omit due to high VIF.
+    """
+    initial_sub_run_file = (
+        cfg.subject_lists / 'initial_qa_pass_and_mask_pass_subjects_runs.csv'
+    )
+    initial_sub_run_df = pd.read_csv(initial_sub_run_file)
+
+    high_vif_sub_run_file = (
+        cfg.data_root
+        / 'scripts'
+        / 'dd-kable-analysis'
+        / 'analyses'
+        / 'beta_series_analysis'
+        / 'subject_lists'
+        / 'vif_gt_5.csv'
+    )
+    high_vif_sub_run_df = pd.read_csv(high_vif_sub_run_file)
+    return initial_sub_run_df, high_vif_sub_run_df
+
+
+def make_high_vif_trial_set(
+    high_vif_sub_run_df: pd.DataFrame,
+) -> set[tuple[str, str, str]]:
+    """
+    Convert a high-VIF omission table into a set of keys for fast filtering.
+
+    Parameters
+    ----------
+    high_vif_sub_run_df
+        Must contain columns: sub_id, run, trial
+        where `trial` matches behav_data['trial_type'] values like 'trial00'.
+
+    Returns
+    -------
+    set
+        Set of (sub_id, run, trial_type) tuples to omit.
+    """
+    required = {'sub_id', 'run', 'trial'}
+    missing = required - set(high_vif_sub_run_df.columns)
+    if missing:
+        raise ValueError(f'vif_gt_5.csv missing columns: {missing}')
+
+    return {
+        (str(r.sub_id), str(r.run), str(r.trial))
+        for r in high_vif_sub_run_df.itertuples(index=False)
+    }
+
+
+def get_subject_good_runs(
+    initial_sub_run_df: pd.DataFrame,
+    sub_id: str,
+    sub_col: str = 'sub_id',
+    run_col: str = 'run',
+) -> list[str]:
+    """
+    Return list of run IDs (strings) that passed initial QA for a subject.
+
+    Parameters
+    ----------
+    initial_sub_run_df
+        QA table containing at least sub_col and run_col.
+    sub_id
+        Subject identifier.
+    sub_col, run_col
+        Column names in initial_sub_run_df.
+
+    Returns
+    -------
+    list[str]
+        Sorted unique run IDs. Empty if subject not present.
+    """
+    if sub_col not in initial_sub_run_df or run_col not in initial_sub_run_df:
+        raise ValueError(f'initial_sub_run_df must have columns {sub_col}, {run_col}')
+
+    runs = (
+        initial_sub_run_df.loc[
+            initial_sub_run_df[sub_col].astype(str) == str(sub_id), run_col
+        ]
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+    return sorted(runs)
+
+
+@dataclass
+class SubjectBehavBoldResult:
+    """
+    Result of building the subject-level trial table linking behavior and betas.
+    """
+
+    behav_bold_df: pd.DataFrame
+    good_runs: list[str]
+    n_trials_before_vif: int
+    n_trials_after_vif_and_missing: int
+    n_missing_betas: int
+    n_high_vif_omitted: int
+    trials_kept_by_run: dict[str, int] | None = None
+    runs_passing_trial_threshold: list[str] | None = None
+
+
+def build_subject_behav_bold_df(
+    cfg: Any,
+    sub_id: str,
+    *,
+    min_runs_required: int = 3,
+    min_trials_per_run: int = 20,
+    strict: bool = True,
+    verbose: bool = True,
+) -> SubjectBehavBoldResult:
+    """
+    Build a per-subject trial table (behavior × beta-series file paths).
+
+    Steps:
+      - load initial QA subject×run list and high-VIF omissions table
+      - determine the subject's QA-passed runs
+      - for each run:
+          - load design matrix / behavioral trial table via make_design_matrix
+          - keep only trial regressors (trial_type matching '^trial')
+          - drop high-VIF trials and trials with missing beta files
+          - merge behavior with available betas
+      - enforce minimum usable runs and minimum trials per run
+
+    Parameters
+    ----------
+    cfg
+        Config object with paths (output_root, subject_lists, data_root).
+    sub_id
+        Subject identifier.
+    min_runs_required
+        Require at least this many usable runs.
+    min_trials_per_run
+        Require at least this many trials per run after omissions.
+    strict
+        If True, raise ValueError when requirements are not met; otherwise warn.
+    verbose
+        If True, print run lists and omission counts.
+
+    Returns
+    -------
+    SubjectBehavBoldResult
+        Contains the concatenated behav_bold_df and QC counts.
+
+    Raises
+    ------
+    ValueError
+        If strict=True and the subject fails run/trial thresholds.
+    """
+    initial_sub_run_df, high_vif_sub_run_df = load_initial_and_vif_tables(cfg)
+    high_vif_trials = make_high_vif_trial_set(high_vif_sub_run_df)
+
+    runs = get_subject_good_runs(initial_sub_run_df, sub_id)
+    if verbose:
+        print(f'[{sub_id}] QA-passed runs: {runs}')
+
+    if len(runs) < min_runs_required:
+        msg = (
+            f'[{sub_id}] has only {len(runs)} QA-passed runs; '
+            f'requires >= {min_runs_required}.'
+        )
+        if strict:
+            raise ValueError(msg)
+        if verbose:
+            print('WARNING:', msg)
+
+    output_dir = (
+        Path(cfg.output_root)
+        / 'beta_series'
+        / 'first_level'
+        / f'sub-{sub_id}'
+        / 'contrast_estimates'
+    )
+
+    behav_bold_all: list[pd.DataFrame] = []
+    n_trials_before = 0
+    n_missing_betas = 0
+    n_high_vif_omitted = 0
+    kept_by_run: dict[str, int] = {}
+
+    for run in runs:
+        behav_data, _, _ = make_design_matrix(cfg, sub_id, run)
+
+        trial_mask = behav_data['trial_type'].astype(str).str.contains(r'^trial')
+        behav_trials = behav_data.loc[trial_mask].copy()
+        trial_types = behav_trials['trial_type'].astype(str).tolist()
+        n_trials_before += len(trial_types)
+
+        rows: list[dict[str, str]] = []
+        for trial_type in trial_types:
+            key = (str(sub_id), str(run), str(trial_type))
+            beta_file = (
+                output_dir
+                / f'sub-{sub_id}_ses-scan1_task-itc_run-{run}_contrast-{trial_type}_output-effectsize.nii.gz'
+            )
+
+            if key in high_vif_trials:
+                n_high_vif_omitted += 1
+                continue
+            if not beta_file.exists():
+                n_missing_betas += 1
+                continue
+
+            rows.append(
+                {'trial_type': trial_type, 'beta_file': str(beta_file), 'run': str(run)}
+            )
+
+        if not rows:
+            kept_by_run[str(run)] = 0
+            continue
+
+        bold_df = pd.DataFrame(rows)
+
+        behav_bold_run = behav_trials.merge(
+            bold_df, on='trial_type', how='inner', validate='one_to_one'
+        )
+
+        kept_by_run[str(run)] = int(len(behav_bold_run))
+        behav_bold_all.append(behav_bold_run)
+
+    behav_bold_df = (
+        pd.concat(behav_bold_all, ignore_index=True)
+        if behav_bold_all
+        else pd.DataFrame()
+    )
+
+    passing_runs = [r for r, n in kept_by_run.items() if n >= min_trials_per_run]
+
+    if verbose:
+        print(f'[{sub_id}] trial regressors in design (pre-filter): {n_trials_before}')
+        print(f'[{sub_id}] omitted high-VIF trials: {n_high_vif_omitted}')
+        print(f'[{sub_id}] missing beta files: {n_missing_betas}')
+        print(f'[{sub_id}] kept trials (post-filter): {len(behav_bold_df)}')
+        print(f'[{sub_id}] kept by run: {kept_by_run}')
+        print(
+            f'[{sub_id}] runs with >= {min_trials_per_run} kept trials: {passing_runs}'
+        )
+
+    if len(passing_runs) < min_runs_required:
+        msg = (
+            f'[{sub_id}] only {len(passing_runs)} runs have >= {min_trials_per_run} '
+            f'kept trials; requires >= {min_runs_required}. kept_by_run={kept_by_run}'
+        )
+        if strict:
+            raise ValueError(msg)
+        if verbose:
+            print('WARNING:', msg)
+
+    # Drop low-trial runs if we still have enough remaining
+    if len(passing_runs) >= min_runs_required and len(passing_runs) < len(runs):
+        if verbose:
+            print(
+                f'[{sub_id}] dropping low-trial runs: {sorted(set(runs) - set(passing_runs))}'
+            )
+        behav_bold_df = behav_bold_df.loc[
+            behav_bold_df['run'].astype(str).isin(passing_runs)
+        ].reset_index(drop=True)
+        runs = passing_runs
+        kept_by_run = {r: kept_by_run[r] for r in passing_runs}
+
+    return SubjectBehavBoldResult(
+        behav_bold_df=behav_bold_df,
+        good_runs=[str(r) for r in runs],
+        n_trials_before_vif=int(n_trials_before),
+        n_trials_after_vif_and_missing=int(len(behav_bold_df)),
+        n_missing_betas=int(n_missing_betas),
+        n_high_vif_omitted=int(n_high_vif_omitted),
+        trials_kept_by_run=kept_by_run,
+        runs_passing_trial_threshold=passing_runs,
+    )
+::::::::::::::
+decode.py
+::::::::::::::
+from __future__ import annotations
+
+"""
+High-level decoding routines.
+
+This module contains:
+- subject-level atlas ROI decoding (nested group CV ridge regression)
+- helper to paint ROI-level scores back into an atlas image for visualization
+"""
+
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from dd_kable_analysis.mvpa.data import build_subject_behav_bold_df
+from dd_kable_analysis.mvpa.features import (
+    filter_voxels_runaware,
+    prepare_subject_for_atlas_mvpa,
+)
+from dd_kable_analysis.mvpa.models import nested_groupcv_ridge_predict
+
+
+def decode_subject_atlas_rois(
+    cfg: Any,
+    sub_id: str,
+    *,
+    atlas_img: str | Path | Any,
+    y_col: str = 'amount',
+    beta_col: str = 'beta_file',
+    group_col: str = 'run',
+    min_voxels_per_roi: int = 50,
+    small_thr: float = 1e-4,
+    max_small_frac: float = 0.05,
+    require_all_runs: bool = True,
+    alphas: np.ndarray | None = None,
+    verbose: bool = True,
+    return_trialwise: bool = False,
+    trialwise_rois: set[int] | None = None,
+) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Decode a behavioral variable from beta-series patterns within atlas ROIs (per subject).
+
+    For each ROI label in `atlas_img`, this function:
+      1) extracts trial × voxel data from that ROI
+      2) applies run-aware voxel QC
+      3) runs nested group CV ridge regression (typically leave-one-run-out)
+      4) stores out-of-sample decoding metrics (r, Fisher-z(r), fold-safe R^2_cv, etc.)
+
+    Parameters
+    ----------
+    cfg
+        Analysis config object (used by build_subject_behav_bold_df and to locate masks).
+    sub_id
+        Subject ID string.
+    atlas_img
+        3D integer label atlas (path or Nifti1Image). Example: Schaefer, Harvard–Oxford.
+        Labels must be integers; 0 is treated as background by ROI mapping code.
+    y_col
+        Column name in the behavioral/design table to decode (e.g., "amount", "delay").
+    beta_col
+        Column name containing beta NIfTI file paths (usually "beta_file").
+    group_col
+        Column name defining CV grouping (usually "run").
+    min_voxels_per_roi
+        Skip ROIs with fewer than this many voxels (pre- or post-QC).
+    small_thr, max_small_frac, require_all_runs
+        Parameters for run-aware voxel QC (`filter_voxels_runaware`).
+    alphas
+        Ridge alpha grid for nested CV. If None, uses model default.
+    verbose
+        If True, prints trial/run QA information during subject table creation and prep.
+    return_trialwise
+        If True, also return a trialwise DataFrame with out-of-sample predictions ŷ.
+    trialwise_rois
+        If return_trialwise=True, restrict trialwise output to these ROI labels.
+        If None and return_trialwise=True, a ValueError is raised to prevent huge outputs.
+
+    Returns
+    -------
+    roi_summary_df
+        DataFrame with one row per ROI that passes voxel thresholds. Columns include:
+        sub_id, roi_label, n_trials, n_runs, n_vox_preQC, n_vox_postQC,
+        r, fisher_z, r2_cv, rmse, mean_alpha.
+    (roi_summary_df, trialwise_df)
+        If return_trialwise=True, also returns trialwise_df with columns like:
+        sub_id, roi_label, run, [trial_type/delay/choseAccept if present], y, yhat_oos.
+
+    Notes
+    -----
+    All decoding metrics are computed from out-of-sample predictions produced by the
+    outer CV loop.
+    """
+    if return_trialwise and trialwise_rois is None:
+        raise ValueError(
+            'return_trialwise=True with trialwise_rois=None will generate a huge '
+            'trialwise table (trials × all ROIs). Pass trialwise_rois (set of ints).'
+        )
+
+    # 1) build df of behavior + beta files (one row per trial)
+    out = build_subject_behav_bold_df(cfg, sub_id=sub_id, verbose=verbose)
+    behav_bold_df = out.behav_bold_df
+
+    # 2) global extraction + ROI mapping
+    prep = prepare_subject_for_atlas_mvpa(
+        behav_bold_df,
+        atlas_img=atlas_img,
+        cfg=cfg,
+        y_col=y_col,
+        beta_col=beta_col,
+        group_col=group_col,
+        standardize_X=False,
+        verbose=verbose,
+    )
+
+    rows: list[dict[str, Any]] = []
+    trialwise_parts: list[pd.DataFrame] = []
+
+    for roi_label, cols in prep.roi_to_cols.items():
+        if cols.size == 0:
+            continue
+
+        X_roi = prep.X_all[:, cols]
+        n_vox_pre = int(X_roi.shape[1])
+        if n_vox_pre < min_voxels_per_roi:
+            continue
+
+        # subject-specific voxel QC (run-aware)
+        try:
+            X_roi_f, _qc = filter_voxels_runaware(
+                X_roi,
+                prep.groups,
+                small_thr=small_thr,
+                max_small_frac=max_small_frac,
+                require_all_runs=require_all_runs,
+                verbose=False,
+            )
+        except RuntimeError:
+            continue
+
+        n_vox_post = int(X_roi_f.shape[1])
+        if n_vox_post < min_voxels_per_roi:
+            continue
+
+        # decode (OOS predictions across all trials)
+        yhat, info = nested_groupcv_ridge_predict(
+            X_roi_f, prep.y, prep.groups, alphas=alphas, verbose=False
+        )
+
+        # ---- trialwise output (optional) ----
+        if return_trialwise and (
+            trialwise_rois is None or int(roi_label) in trialwise_rois
+        ):
+            df_tw = prep.df_used.copy().reset_index(drop=True)
+
+            if 'run' in df_tw.columns:
+                df_tw['run'] = df_tw['run'].astype(str)
+
+            df_tw['sub_id'] = str(sub_id)
+            df_tw['roi_label'] = int(roi_label)
+            df_tw['y'] = prep.y
+            df_tw['yhat_oos'] = yhat
+
+            extra_cols = [
+                c
+                for c in ['trial_type', 'Delay', 'amount', 'choseAccept']
+                if c in df_tw.columns
+            ]
+            cols_tw = ['sub_id', 'roi_label', 'run'] + extra_cols + ['y', 'yhat_oos']
+            cols_tw = [c for c in cols_tw if c in df_tw.columns]
+            trialwise_parts.append(df_tw[cols_tw])
+
+        # ---- summary row ----
+        r = float(info['r'])
+        rows.append(
+            dict(
+                sub_id=str(sub_id),
+                roi_label=int(roi_label),
+                n_trials=int(len(prep.y)),
+                n_runs=int(len(np.unique(prep.groups))),
+                n_vox_preQC=n_vox_pre,
+                n_vox_postQC=n_vox_post,
+                r=r,
+                r2_cv=float(info['r2_cv']),
+                fisher_z=float(np.arctanh(np.clip(r, -0.999999, 0.999999))),
+                rmse=float(info['rmse']),
+                mean_alpha=float(np.mean(info['chosen_alphas']))
+                if len(info['chosen_alphas'])
+                else np.nan,
+            )
+        )
+
+    roi_summary_df = (
+        pd.DataFrame(rows).sort_values(['roi_label']).reset_index(drop=True)
+    )
+
+    if return_trialwise:
+        trialwise_df = (
+            pd.concat(trialwise_parts, ignore_index=True)
+            if len(trialwise_parts)
+            else pd.DataFrame()
+        )
+        return roi_summary_df, trialwise_df
+
+    return roi_summary_df
+
+
+def roi_scores_to_atlas_image(
+    roi_summary_df: pd.DataFrame,
+    atlas_img: str | Path | Any,
+    *,
+    score_col: str = 'r2_cv',
+    background_value: float = 0.0,
+    reference_img: str | Path | Any | None = None,
+):
+    """
+    Paint ROI-level scores into a voxelwise image on the atlas grid.
+
+    Parameters
+    ----------
+    roi_summary_df
+        DataFrame with columns ['roi_label', score_col].
+    atlas_img
+        Label atlas image (path or Nifti1Image).
+    score_col
+        Column from roi_summary_df to paint into parcels (e.g., 'r2_cv', 'fisher_z').
+    background_value
+        Value for voxels where atlas label == 0.
+    reference_img
+        Optional reference image to resample the output onto (e.g., a beta image).
+
+    Returns
+    -------
+    score_img
+        nib.Nifti1Image with voxelwise values assigned per parcel.
+    """
+    import nibabel as nib
+    from nilearn.image import resample_to_img
+
+    atlas_img = (
+        nib.load(str(atlas_img)) if not hasattr(atlas_img, 'get_fdata') else atlas_img
+    )
+    atlas_data = atlas_img.get_fdata().astype(int)
+
+    score_map = dict(
+        zip(
+            roi_summary_df['roi_label'].astype(int).to_numpy(),
+            roi_summary_df[score_col].to_numpy(),
+        )
+    )
+
+    out = np.full(atlas_data.shape, background_value, dtype=np.float32)
+    for lab, val in score_map.items():
+        out[atlas_data == lab] = np.float32(val)
+
+    score_img = nib.Nifti1Image(out, affine=atlas_img.affine)
+
+    if reference_img is not None:
+        ref = (
+            nib.load(str(reference_img))
+            if not hasattr(reference_img, 'get_fdata')
+            else reference_img
+        )
+        score_img = resample_to_img(
+            score_img,
+            ref,
+            interpolation='continuous',
+            force_resample=True,
+            copy_header=True,
+        )
+
+    return score_img
+::::::::::::::
+features.py
+::::::::::::::
+from __future__ import annotations
+
+"""
+Feature extraction and ROI mapping utilities for atlas-based MVPA.
+
+This module handles:
+- run-aware voxel QC (drop voxels that are near-zero too often within runs)
+- extracting a global trial × voxel feature matrix (X_all) from beta-series images
+  using a group mask
+- mapping a label atlas (e.g., Schaefer, Harvard–Oxford) into column indices
+  of X_all via a shared NiftiMasker voxel ordering
+- packaging everything needed for downstream ROI-wise decoding
+"""
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import nibabel as nib
+import numpy as np
+import pandas as pd
+from nilearn.image import resample_to_img
+from nilearn.maskers import NiftiMasker
+
+
+@dataclass
+class VoxelFilterInfo:
+    """Metadata returned by run-aware voxel filtering."""
+
+    n_vox_in: int
+    n_vox_out: int
+    keep_mask: np.ndarray  # shape: (n_vox_in,)
+    frac_small_by_run: dict[str, np.ndarray]  # run -> (n_vox_in,) fraction near-zero
+    params: dict[str, Any]
+
+
+def filter_voxels_runaware(
+    X: np.ndarray,
+    groups: np.ndarray,
+    *,
+    small_thr: float = 1e-4,
+    max_small_frac: float = 0.05,
+    require_all_runs: bool = True,
+    verbose: bool = False,
+) -> tuple[np.ndarray, VoxelFilterInfo]:
+    """
+    Run-aware voxel QC filter.
+
+    Drops voxels that are "near zero" too often within any run. This is intended to
+    remove voxels that are effectively absent / zeroed out due to dropout or masking.
+
+    Parameters
+    ----------
+    X
+        Array of shape (n_trials, n_voxels) for a single ROI.
+    groups
+        Run labels for each trial. Shape (n_trials,). Will be cast to str.
+    small_thr
+        Absolute value threshold below which a voxel value counts as "small".
+    max_small_frac
+        Maximum allowed fraction of trials in a run for which |X| < small_thr.
+        Voxels exceeding this fraction are dropped.
+    require_all_runs
+        If True, a voxel must pass the criterion in every run.
+        If False, a voxel may fail in at most 1 run.
+    verbose
+        Currently unused (placeholder for debugging).
+
+    Returns
+    -------
+    Xf
+        Filtered X with shape (n_trials, n_vox_out).
+    info
+        VoxelFilterInfo with keep mask and per-run small fractions.
+
+    Raises
+    ------
+    RuntimeError
+        If no voxels remain after filtering.
+    """
+    X = np.asarray(X)
+    groups = np.asarray(groups).astype(str)
+
+    uniq_runs = np.unique(groups)
+    n_vox = X.shape[1]
+    frac_small_by_run: dict[str, np.ndarray] = {}
+    good_by_run = []
+
+    for r in uniq_runs:
+        m = groups == r
+        frac_small = np.mean(np.abs(X[m, :]) < small_thr, axis=0)
+        frac_small_by_run[str(r)] = frac_small
+        good_by_run.append(frac_small <= max_small_frac)
+
+    good_by_run = np.stack(good_by_run, axis=0)
+
+    keep = (
+        np.all(good_by_run, axis=0)
+        if require_all_runs
+        else (np.sum(good_by_run, axis=0) >= (len(uniq_runs) - 1))
+    )
+
+    Xf = X[:, keep]
+    info = VoxelFilterInfo(
+        n_vox_in=int(n_vox),
+        n_vox_out=int(Xf.shape[1]),
+        keep_mask=keep,
+        frac_small_by_run=frac_small_by_run,
+        params=dict(
+            small_thr=float(small_thr),
+            max_small_frac=float(max_small_frac),
+            require_all_runs=bool(require_all_runs),
+        ),
+    )
+
+    if Xf.shape[1] == 0:
+        raise RuntimeError('0 voxels remain after run-aware filtering.')
+
+    return Xf, info
+
+
+@dataclass
+class SubjectPreparedMVPA:
+    """
+    Output of per-subject feature preparation for atlas-based decoding.
+    """
+
+    df_used: pd.DataFrame
+    X_all: np.ndarray  # (n_trials, n_vox_global)
+    y: np.ndarray  # (n_trials,)
+    groups: np.ndarray  # (n_trials,) run labels (strings)
+    ref_img: nib.Nifti1Image
+    masker_global: NiftiMasker
+    atlas_labels_vec: np.ndarray  # (n_vox_global,) integer atlas label per voxel/column
+    roi_to_cols: dict[int, np.ndarray]  # roi_label -> column indices into X_all
+
+
+def extract_subject_global_Xy_groups(
+    behav_bold_df: pd.DataFrame,
+    *,
+    group_mask_file: str | Path,
+    y_col: str = 'amount',
+    beta_col: str = 'beta_file',
+    group_col: str = 'run',
+    standardize_X: bool = False,
+    verbose: bool = False,
+) -> tuple[
+    pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, nib.Nifti1Image, NiftiMasker
+]:
+    """
+    Extract global X (trial × voxel) matrix using a group mask, and return y and run groups.
+
+    This loads all beta-series NIfTIs listed in `behav_bold_df[beta_col]` and applies
+    `group_mask_file` (resampling the mask only if needed) to obtain a consistent voxel
+    ordering across trials.
+
+    Parameters
+    ----------
+    behav_bold_df
+        Trial table with at least columns [y_col, beta_col, group_col].
+    group_mask_file
+        Path to a 3D binary mask image in the same space as the beta images.
+    y_col
+        Column name in behav_bold_df for target y.
+    beta_col
+        Column name containing beta NIfTI file paths (one per trial).
+    group_col
+        Column name for grouping variable used for CV (e.g., run).
+    standardize_X
+        If True, have NiftiMasker standardize features (usually False because you
+        standardize within CV folds in the model pipeline).
+    verbose
+        If True, print basic shapes and per-run trial counts.
+
+    Returns
+    -------
+    df_used
+        Cleaned trial DataFrame used for extraction (rows correspond to X rows).
+    X_all
+        Array shape (n_trials, n_vox_global).
+    y
+        Array shape (n_trials,).
+    groups
+        Run labels as strings, shape (n_trials,).
+    ref_img
+        First beta image loaded (used as reference grid).
+    masker_global
+        Fitted NiftiMasker used for extraction (voxel ordering consistent with X_all).
+    """
+    needed = {y_col, beta_col, group_col}
+    missing = needed - set(behav_bold_df.columns)
+    if missing:
+        raise ValueError(f'Missing columns in behav_bold_df: {missing}')
+
+    df_used = (
+        behav_bold_df.dropna(subset=[y_col, beta_col, group_col])
+        .copy()
+        .reset_index(drop=True)
+    )
+    if df_used.empty:
+        raise ValueError('behav_bold_df empty after dropping NAs.')
+
+    beta_files = df_used[beta_col].astype(str).tolist()
+    ref_img = nib.load(beta_files[0])
+
+    group_mask_img = nib.load(str(group_mask_file))
+    if group_mask_img.shape[:3] == ref_img.shape[:3] and np.allclose(
+        group_mask_img.affine, ref_img.affine
+    ):
+        group_mask_rs = group_mask_img
+    else:
+        group_mask_rs = resample_to_img(
+            group_mask_img,
+            ref_img,
+            interpolation='nearest',
+            force_resample=False,
+            copy_header=True,
+        )
+
+    masker_global = NiftiMasker(mask_img=group_mask_rs, standardize=standardize_X)
+    masker_global.fit()
+    X_all = masker_global.transform(beta_files)  # (n_trials, n_vox_global)
+
+    y = df_used[y_col].to_numpy(dtype=float)
+    groups = df_used[group_col].astype(str).to_numpy()
+
+    if verbose:
+        nvox = int(masker_global.mask_img_.get_fdata().astype(bool).sum())
+        print(
+            f'[global] X_all={X_all.shape} (mask vox={nvox}) y={y.shape} groups={groups.shape}'
+        )
+        print(
+            '[global] trials per run:\n',
+            pd.Series(groups).value_counts().sort_index().to_string(),
+        )
+
+    return df_used, X_all, y, groups, ref_img, masker_global
+
+
+def make_roi_column_index_map(
+    atlas_img: str | Path | nib.Nifti1Image,
+    masker_global: NiftiMasker,
+    *,
+    drop_label: int = 0,
+    verbose: bool = False,
+) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+    """
+    Map atlas parcel labels to column indices in X_all.
+
+    This uses the fitted `masker_global` to transform the atlas label image into
+    the same voxel ordering as X_all's columns.
+
+    Parameters
+    ----------
+    atlas_img
+        3D integer label atlas image (e.g., Schaefer, Harvard–Oxford).
+    masker_global
+        Fitted NiftiMasker defining the voxel ordering of X_all.
+    drop_label
+        Label value to ignore (usually 0 for background).
+    verbose
+        If True, print ROI size percentiles.
+
+    Returns
+    -------
+    atlas_labels_vec
+        Array shape (n_vox_global,) giving the atlas label for each X_all column.
+    roi_to_cols
+        Dict mapping integer ROI label -> array of column indices into X_all.
+    """
+    atlas_img = (
+        nib.load(str(atlas_img)) if not hasattr(atlas_img, 'get_fdata') else atlas_img
+    )
+
+    atlas_vec = masker_global.transform(atlas_img).ravel()
+    atlas_labels_vec = np.round(atlas_vec).astype(int)
+
+    labels = np.unique(atlas_labels_vec)
+    labels = [int(l) for l in labels if int(l) != drop_label]
+    roi_to_cols = {l: np.where(atlas_labels_vec == l)[0] for l in labels}
+
+    if verbose:
+        sizes = np.array([len(v) for v in roi_to_cols.values()], dtype=int)
+        print(f'[roi map] n_rois={len(roi_to_cols)}')
+        if len(sizes):
+            print(
+                '[roi map] voxels per ROI percentiles:',
+                np.percentile(sizes, [0, 5, 50, 95, 100]),
+            )
+
+    return atlas_labels_vec, roi_to_cols
+
+
+def prepare_subject_for_atlas_mvpa(
+    behav_bold_df: pd.DataFrame,
+    *,
+    atlas_img: str | Path | nib.Nifti1Image,
+    cfg: Any | None = None,
+    group_mask_file: str | Path | None = None,
+    y_col: str = 'amount',
+    beta_col: str = 'beta_file',
+    group_col: str = 'run',
+    standardize_X: bool = False,
+    verbose: bool = False,
+) -> SubjectPreparedMVPA:
+    """
+    Prepare a subject for atlas-based MVPA decoding.
+
+    This function:
+    1) extracts global X_all, y, and groups using a group mask
+    2) projects the atlas label image into the same voxel ordering as X_all
+    3) returns a SubjectPreparedMVPA bundle that downstream decoders can use
+
+    Parameters
+    ----------
+    behav_bold_df
+        Trial table with beta paths and behavioral columns.
+    atlas_img
+        3D integer label atlas.
+    cfg
+        Config object; used only if group_mask_file is not provided.
+    group_mask_file
+        Optional explicit path to a group mask NIfTI.
+    y_col, beta_col, group_col
+        Column names in behav_bold_df.
+    standardize_X
+        Whether to have NiftiMasker standardize features (typically False).
+    verbose
+        Print debug info.
+
+    Returns
+    -------
+    SubjectPreparedMVPA
+        Prepared subject bundle for ROI-wise decoding.
+    """
+    if group_mask_file is None:
+        if cfg is None:
+            raise ValueError('Provide cfg or group_mask_file.')
+        group_mask_file = (
+            cfg.masks_dir
+            / 'assess_subject_bold_dropout'
+            / 'group_mask_intersection_30pct.nii.gz'
+        )
+
+    df_used, X_all, y, groups, ref_img, masker_global = (
+        extract_subject_global_Xy_groups(
+            behav_bold_df,
+            group_mask_file=group_mask_file,
+            y_col=y_col,
+            beta_col=beta_col,
+            group_col=group_col,
+            standardize_X=standardize_X,
+            verbose=verbose,
+        )
+    )
+
+    atlas_labels_vec, roi_to_cols = make_roi_column_index_map(
+        atlas_img, masker_global, verbose=verbose
+    )
+
+    return SubjectPreparedMVPA(
+        df_used=df_used,
+        X_all=X_all,
+        y=y,
+        groups=groups,
+        ref_img=ref_img,
+        masker_global=masker_global,
+        atlas_labels_vec=atlas_labels_vec,
+        roi_to_cols=roi_to_cols,
+    )
+::::::::::::::
+__init__.py
+::::::::::::::
+from __future__ import annotations
+
+from dd_kable_analysis.mvpa.cache import (
+    SubjectMVPAFeatureCache,
+    get_subject_cache_path,
+    load_subject_prep_cache,
+    roi_to_cols_from_atlas_labels,
+    save_subject_prep_cache,
+)
+from dd_kable_analysis.mvpa.data import (
+    SubjectBehavBoldResult,
+    build_subject_behav_bold_df,
+    get_subject_good_runs,
+    load_initial_and_vif_tables,
+    make_high_vif_trial_set,
+)
+from dd_kable_analysis.mvpa.decode import (
+    decode_subject_atlas_rois,
+    roi_scores_to_atlas_image,
+)
+from dd_kable_analysis.mvpa.features import (
+    SubjectPreparedMVPA,
+    VoxelFilterInfo,
+    extract_subject_global_Xy_groups,
+    filter_voxels_runaware,
+    make_roi_column_index_map,
+    prepare_subject_for_atlas_mvpa,
+)
+from dd_kable_analysis.mvpa.models import nested_groupcv_ridge_predict
+
+__all__ = [
+    'load_initial_and_vif_tables',
+    'make_high_vif_trial_set',
+    'get_subject_good_runs',
+    'SubjectBehavBoldResult',
+    'build_subject_behav_bold_df',
+    'nested_groupcv_ridge_predict',
+    'VoxelFilterInfo',
+    'filter_voxels_runaware',
+    'SubjectPreparedMVPA',
+    'extract_subject_global_Xy_groups',
+    'make_roi_column_index_map',
+    'prepare_subject_for_atlas_mvpa',
+    'decode_subject_atlas_rois',
+    'roi_scores_to_atlas_image',
+    'SubjectMVPAFeatureCache',
+    'get_subject_cache_path',
+    'save_subject_prep_cache',
+    'load_subject_prep_cache',
+    'roi_to_cols_from_atlas_labels',
+]
+::::::::::::::
+models.py
+::::::::::::::
+from __future__ import annotations
+
+"""
+Modeling utilities for MVPA decoding.
+
+Currently provides:
+- nested, group-aware cross-validated ridge regression
+- out-of-sample predictions for every sample
+- fold-safe cross-validated R^2 (baseline mean computed from training data per fold)
+"""
+
+from typing import Any, Iterable
+
+import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GroupKFold
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+
+def nested_groupcv_ridge_predict(
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    *,
+    alphas: np.ndarray | None = None,
+    verbose: bool = True,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """
+    Nested group CV ridge regression with out-of-sample predictions.
+
+    Outer loop:
+      - GroupKFold with n_splits = number of unique groups (typically leave-one-run-out)
+      - used to generate out-of-sample predictions for every sample
+
+    Inner loop:
+      - GroupKFold within the outer training set
+      - selects ridge alpha by minimizing mean squared error (MSE)
+
+    Important: X is standardized within each fit via a Pipeline(StandardScaler, Ridge).
+
+    Parameters
+    ----------
+    X
+        Feature matrix of shape (n_samples, n_features).
+    y
+        Target vector of shape (n_samples,). Must be numeric.
+    groups
+        Group labels of shape (n_samples,) used for GroupKFold splits (e.g., run IDs).
+        Must contain at least 3 unique groups for nested CV.
+    alphas
+        Candidate ridge penalties to search over. If None, uses a default log grid.
+    verbose
+        If True, prints outer fold info and best inner alphas.
+
+    Returns
+    -------
+    y_pred_oos
+        Out-of-sample predictions for each sample, shape (n_samples,).
+        Every entry is predicted from a model that did not train on its group.
+    info
+        Dictionary of summary metrics and fold details. Keys include:
+          - n_samples, n_features, n_groups
+          - rmse, mse
+          - r: corr(y, y_pred_oos) across all samples
+          - r2: R^2 using global mean baseline (less strict; kept for reference)
+          - r2_cv: fold-safe cross-validated R^2 using training-mean baseline per outer fold
+          - chosen_alphas: list of selected alpha per outer fold
+          - outer_folds: list of dicts with per-fold metrics (mse, r, sse, baseline sse, etc.)
+
+    Notes
+    -----
+    Fold-safe R^2_cv is computed as:
+
+      For each outer fold k:
+        SSE_k = sum_{i in test_k} (y_i - yhat_i)^2
+        ybar_train_k = mean(y_train_k)
+        SSE_base_k = sum_{i in test_k} (y_i - ybar_train_k)^2
+
+      Aggregate across folds:
+        R^2_cv = 1 - (sum_k SSE_k) / (sum_k SSE_base_k)
+
+    Negative R^2_cv is possible and indicates worse-than-baseline predictions.
+    """
+    X = np.asarray(X)
+    y = np.asarray(y, dtype=float)
+    groups = np.asarray(groups)
+
+    uniq = np.unique(groups)
+    n_groups = len(uniq)
+    if n_groups < 3:
+        raise ValueError(f'Need >=3 groups for nested CV; found {n_groups}: {uniq}')
+
+    if alphas is None:
+        alphas = 10.0 ** np.linspace(-2, 6, 20)
+    alphas = np.asarray(alphas, dtype=float)
+
+    def make_pipe(alpha: float) -> Pipeline:
+        return Pipeline(
+            [
+                ('scaler', StandardScaler(with_mean=True, with_std=True)),
+                ('ridge', Ridge(alpha=alpha, fit_intercept=True)),
+            ]
+        )
+
+    outer_cv = GroupKFold(n_splits=n_groups)
+    y_pred_oos = np.full(y.shape, np.nan, dtype=float)
+
+    chosen_alphas: list[float] = []
+    outer_folds: list[dict[str, Any]] = []
+
+    # accumulators for fold-safe R2_cv
+    sse_total = 0.0
+    sse_base_total = 0.0
+
+    for fold, (tr_idx, te_idx) in enumerate(
+        outer_cv.split(X, y, groups=groups), start=1
+    ):
+        te_groups = np.unique(groups[te_idx])
+        tr_groups = np.unique(groups[tr_idx])
+
+        if verbose:
+            print(
+                f'\n[outer {fold}/{n_groups}] test groups={te_groups} train groups={tr_groups}'
+            )
+            print(f'  n_train={len(tr_idx)} n_test={len(te_idx)}')
+
+        inner_groups = groups[tr_idx]
+        inner_uniq = np.unique(inner_groups)
+        if len(inner_uniq) < 2:
+            raise RuntimeError('Inner CV needs >=2 groups inside outer train.')
+
+        inner_cv = GroupKFold(n_splits=len(inner_uniq))
+
+        mean_mses: list[float] = []
+        for a in alphas:
+            mses: list[float] = []
+            for tr2, va2 in inner_cv.split(X[tr_idx], y[tr_idx], groups=inner_groups):
+                tr = tr_idx[tr2]
+                va = tr_idx[va2]
+                pipe = make_pipe(float(a))
+                pipe.fit(X[tr], y[tr])
+                pred = pipe.predict(X[va])
+                mses.append(float(np.mean((y[va] - pred) ** 2)))
+            mean_mses.append(float(np.mean(mses)))
+
+        mean_mses_arr = np.asarray(mean_mses, dtype=float)
+        best_alpha = float(alphas[int(np.argmin(mean_mses_arr))])
+        chosen_alphas.append(best_alpha)
+
+        if verbose:
+            best_k = np.argsort(mean_mses_arr)[:5]
+            print(f'  best alpha={best_alpha:.4g}')
+            print('  top inner (alpha, mean MSE):')
+            for j in best_k:
+                print(f'    {alphas[j]:.4g}  {mean_mses_arr[j]:.4g}')
+
+        pipe = make_pipe(best_alpha)
+        pipe.fit(X[tr_idx], y[tr_idx])
+        yhat = pipe.predict(X[te_idx])
+        y_pred_oos[te_idx] = yhat
+
+        y_te = y[te_idx]
+        y_tr = y[tr_idx]
+
+        fold_mse = float(np.mean((y_te - yhat) ** 2))
+        fold_r = float(np.corrcoef(y_te, yhat)[0, 1]) if len(te_idx) > 2 else np.nan
+
+        # fold-safe SSE and baseline SSE (training mean baseline)
+        sse_k = float(np.sum((y_te - yhat) ** 2))
+        ybar_tr = float(np.mean(y_tr))
+        sse_base_k = float(np.sum((y_te - ybar_tr) ** 2))
+        sse_total += sse_k
+        sse_base_total += sse_base_k
+
+        outer_folds.append(
+            dict(
+                fold=int(fold),
+                test_groups=[str(g) for g in te_groups.tolist()],
+                best_alpha=float(best_alpha),
+                test_mse=float(fold_mse),
+                test_r=float(fold_r) if np.isfinite(fold_r) else np.nan,
+                sse_k=float(sse_k),
+                sse_base_k=float(sse_base_k),
+                ybar_train=float(ybar_tr),
+                n_train=int(len(tr_idx)),
+                n_test=int(len(te_idx)),
+            )
+        )
+
+        if verbose:
+            print(f'  outer test mse={fold_mse:.4g} r={fold_r:.4g}')
+
+    ok = np.isfinite(y_pred_oos)
+    if not np.all(ok):
+        raise RuntimeError('Some samples missing OOS predictions. Check group splits.')
+
+    mse = float(np.mean((y - y_pred_oos) ** 2))
+    rmse = float(np.sqrt(mse))
+
+    # correlation is fine (all preds are OOS)
+    r = float(np.corrcoef(y, y_pred_oos)[0, 1])
+
+    # r2 (global-mean baseline)
+    sst = float(np.sum((y - np.mean(y)) ** 2))
+    sse = float(np.sum((y - y_pred_oos) ** 2))
+    r2_globalmean = float(1.0 - sse / sst) if sst > 0 else np.nan
+
+    # fold-safe R2_cv
+    r2_cv = float(1.0 - sse_total / sse_base_total) if sse_base_total > 0 else np.nan
+
+    info: dict[str, Any] = dict(
+        n_samples=int(len(y)),
+        n_features=int(X.shape[1]),
+        n_groups=int(n_groups),
+        rmse=float(rmse),
+        mse=float(mse),
+        r=float(r),
+        r2_cv=float(r2_cv),
+        r2=float(r2_globalmean),
+        chosen_alphas=chosen_alphas,
+        outer_folds=outer_folds,
+        alpha_grid=alphas.tolist(),
+    )
+
+    if verbose:
+        print(
+            '\n[overall OOS] rmse={:.4g} mse={:.4g} r={:.4g} r2_cv={:.4g} (r2_globalmean={:.4g})'.format(
+                rmse, mse, r, r2_cv, r2_globalmean
+            )
+        )
+
+    return y_pred_oos, info
