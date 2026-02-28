@@ -1,5 +1,5 @@
 # ignore our slurm log directories
-**/log/
+**/logs/
 
 # ignore directories named garbage (used for temporary code)
 garbage/
