@@ -1,0 +1,23 @@
+id: ll_ss_group_model_comparison
+name: LL-SS group model comparison
+stage: group
+description: >
+  Group-level comparisons for LL vs SS effects using summary outputs and QA notebooks.
+code_dir: "analyses/ll_ss_group_model_comparison"
+dependencies: []
+script_entry: null
+notebook_entry:
+  - "accept_minus_reject_individual_run_comparison.ipynb"
+  - "accept_reject_group_comparison.ipynb"
+other_files: null
+results_files:
+  - "accept_minus_reject_individual_run_comparison.ipynb"
+  - "accept_reject_group_comparison.ipynb"
+output_dir: null
+hypothesis: null
+conclusion: null
+notes: >
+  TBD
+status: "in progress"
+last_updated: "2026-02-13"
+authors: ["Jeanette Mumford"]
