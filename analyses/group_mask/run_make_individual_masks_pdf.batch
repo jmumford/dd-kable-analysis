@@ -1,0 +1,17 @@
+#!/bin/bash
+#SBATCH --job-name=make_individual_masks_pdf
+#SBATCH --output=/oak/stanford/groups/russpold/users/buckholtz/DD_Kable/scripts/dd-kable-analysis/logs/make_individual_masks_pdf_%A_%a.out
+#SBATCH --error=/oak/stanford/groups/russpold/users/buckholtz/DD_Kable/scripts/dd-kable-analysis/logs/make_individual_masks_pdf_%A_%a.err
+#SBATCH --time=02:00:00
+#SBATCH -p russpold,hns,normal
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=48G
+
+PROJECT_ROOT="/oak/stanford/groups/russpold/users/buckholtz/DD_Kable/scripts/dd-kable-analysis"
+SCRIPT_DIR="$PROJECT_ROOT/analyses/group_mask"
+UV_SETUP="$PROJECT_ROOT/setup_uv_sherlock.sh"
+
+source "$UV_SETUP"
+
+uv --directory "$PROJECT_ROOT" run "$SCRIPT_DIR/make_individual_masks_pdf.py"
