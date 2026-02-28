@@ -6,13 +6,19 @@ description: >
   Assess the results for outliers.
 code_dir: "analyses/beta_series_analysis"
 dependencies: []
-script_entry: null
+script_entry:
+  - "run_beta_series.py"
+  - "submit_beta_series.sh"
 notebook_entry:
   - "beta_series_analysis_code_dev.ipynb"
   - "qa_design_matrices.ipynb"
+  - "qa_analysis_output.ipynb"
 other_files: null
 results_files:
   - "/figures/design_matrix_assessment.pdf"
+  - "beta_series_analysis_code_dev.ipynb"
+  - "qa_design_matrices.ipynb"
+  - "qa_analysis_output.ipynb"
 output_dir: null
 hypothesis: null
 conclusion: "Beta series model has stable VIFs across trial estimates."
