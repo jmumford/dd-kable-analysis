@@ -15,7 +15,9 @@
 <tr><td>traditional model analysis</td><td>Set up design matrices and contrasts for the traditional model, and run the analysis on the included subjects and runs. Assess the results for outliers.</td><td>completed</td><td><a href="../analyses/traditional_model_analysis/model_code_dev.ipynb">model_code_dev.ipynb</a>, <a href="../analyses/traditional_model_analysis/qa_analysis_output.ipynb">qa_analysis_output.ipynb</a></td><td>TBD</td></tr>
 <tr><th colspan="5"><strong>Time Series And Group</strong></th></tr>
 <tr><td>ID</td><td>Description</td><td>Status</td><td>Results Files</td><td>Notes</td></tr>
+<tr><td>mvpa value decoding ho subcort rois</td><td>MVPA value decoding using Harvard-Oxford subcortical ROIs, including aggregated results.</td><td>complete</td><td><a href="../analyses/mvpa_value_decoding/ho_subcort_rois/mvpa_ho_subcort_aggregate_results.ipynb">mvpa_ho_subcort_aggregate_results.ipynb</a></td><td>TBD</td></tr>
 <tr><td>mvpa value decoding josh rois</td><td>MVPA value decoding using Josh ROIs, including data prep and aggregated results.</td><td>complete</td><td><a href="../analyses/mvpa_value_decoding/mvpa_josh_rois/mvpa_josh_rois_prep.ipynb">mvpa_josh_rois_prep.ipynb</a>, <a href="../analyses/mvpa_value_decoding/mvpa_josh_rois/mvpa_josh_rois_aggregate_results.ipynb">mvpa_josh_rois_aggregate_results.ipynb</a></td><td>TBD</td></tr>
+<tr><td>mvpa value decoding pauli subcort rois</td><td>MVPA value decoding using Pauli subcortical ROIs, including ROI prep and aggregated results.</td><td>complete</td><td><a href="../analyses/mvpa_value_decoding/pauli_subcort_rois/make_roi_img_2mm.ipynb">make_roi_img_2mm.ipynb</a>, <a href="../analyses/mvpa_value_decoding/pauli_subcort_rois/mvpa_pauli_rois_aggregate_results.ipynb">mvpa_pauli_rois_aggregate_results.ipynb</a></td><td>TBD</td></tr>
 <tr><td>mvpa value decoding schaefer rois</td><td>MVPA value decoding using Schaefer ROIs, including aggregated results.</td><td>complete</td><td><a href="../analyses/mvpa_value_decoding/schaefer_rois/mvpa_schaefer_aggregate_results.ipynb">mvpa_schaefer_aggregate_results.ipynb</a></td><td>TBD</td></tr>
 <tr><th colspan="5"><strong>Group</strong></th></tr>
 <tr><td>ID</td><td>Description</td><td>Status</td><td>Results Files</td><td>Notes</td></tr>
@@ -177,6 +179,29 @@
 
 ## Time Series And Group
 
+### mvpa_value_decoding_ho_subcort_rois
+**Name:** MVPA value decoding (Harvard-Oxford subcortical ROIs)<br>
+**Description:** MVPA value decoding using Harvard-Oxford subcortical ROIs, including aggregated results.<br>
+**Code Directory:** analyses/mvpa_value_decoding/ho_subcort_rois<br>
+**Dependencies:** None<br>
+**Script Entry:**
+- submit_run_ho_subcort_rois.sh
+
+**Notebook Entry:**
+- mvpa_ho_subcort_aggregate_results.ipynb
+
+**Other Files:** None<br>
+**Output Directory:** None<br>
+**Results Files:** <a href="../analyses/mvpa_value_decoding/ho_subcort_rois/mvpa_ho_subcort_aggregate_results.ipynb">mvpa_ho_subcort_aggregate_results.ipynb</a><br>
+**Hypothesis:** None<br>
+**Conclusion:** None<br>
+**Notes:** TBD<br>
+**Status:** complete<br>
+**Last Updated:** 2026-03-01<br>
+**Authors:** Jeanette Mumford<br>
+
+---
+
 ### mvpa_value_decoding_josh_rois
 **Name:** MVPA value decoding (Josh ROIs)<br>
 **Description:** MVPA value decoding using Josh ROIs, including data prep and aggregated results.<br>
@@ -198,6 +223,30 @@
 **Notes:** TBD<br>
 **Status:** complete<br>
 **Last Updated:** 2026-02-28<br>
+**Authors:** Jeanette Mumford<br>
+
+---
+
+### mvpa_value_decoding_pauli_subcort_rois
+**Name:** MVPA value decoding (Pauli subcortical ROIs)<br>
+**Description:** MVPA value decoding using Pauli subcortical ROIs, including ROI prep and aggregated results.<br>
+**Code Directory:** analyses/mvpa_value_decoding/pauli_subcort_rois<br>
+**Dependencies:** None<br>
+**Script Entry:**
+- submit_run_pauli_rois.sh
+
+**Notebook Entry:**
+- make_roi_img_2mm.ipynb
+- mvpa_pauli_rois_aggregate_results.ipynb
+
+**Other Files:** None<br>
+**Output Directory:** None<br>
+**Results Files:** <a href="../analyses/mvpa_value_decoding/pauli_subcort_rois/make_roi_img_2mm.ipynb">make_roi_img_2mm.ipynb</a>, <a href="../analyses/mvpa_value_decoding/pauli_subcort_rois/mvpa_pauli_rois_aggregate_results.ipynb">mvpa_pauli_rois_aggregate_results.ipynb</a><br>
+**Hypothesis:** None<br>
+**Conclusion:** None<br>
+**Notes:** TBD<br>
+**Status:** complete<br>
+**Last Updated:** 2026-03-01<br>
 **Authors:** Jeanette Mumford<br>
 
 ---

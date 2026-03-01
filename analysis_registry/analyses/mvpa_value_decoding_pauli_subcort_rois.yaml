@@ -1,0 +1,24 @@
+id: mvpa_value_decoding_pauli_subcort_rois
+name: MVPA value decoding (Pauli subcortical ROIs)
+stage: time series and group
+description: >
+  MVPA value decoding using Pauli subcortical ROIs, including ROI prep and aggregated results.
+code_dir: "analyses/mvpa_value_decoding/pauli_subcort_rois"
+dependencies: []
+script_entry:
+  - "submit_run_pauli_rois.sh"
+notebook_entry:
+  - "make_roi_img_2mm.ipynb"
+  - "mvpa_pauli_rois_aggregate_results.ipynb"
+other_files: null
+results_files:
+  - "make_roi_img_2mm.ipynb"
+  - "mvpa_pauli_rois_aggregate_results.ipynb"
+output_dir: null
+hypothesis: null
+conclusion: null
+notes: >
+  TBD
+status: "complete"
+last_updated: "2026-03-01"
+authors: ["Jeanette Mumford"]

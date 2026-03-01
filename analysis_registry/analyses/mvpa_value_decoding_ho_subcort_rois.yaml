@@ -1,0 +1,22 @@
+id: mvpa_value_decoding_ho_subcort_rois
+name: MVPA value decoding (Harvard-Oxford subcortical ROIs)
+stage: time series and group
+description: >
+  MVPA value decoding using Harvard-Oxford subcortical ROIs, including aggregated results.
+code_dir: "analyses/mvpa_value_decoding/ho_subcort_rois"
+dependencies: []
+script_entry:
+  - "submit_run_ho_subcort_rois.sh"
+notebook_entry:
+  - "mvpa_ho_subcort_aggregate_results.ipynb"
+other_files: null
+results_files:
+  - "mvpa_ho_subcort_aggregate_results.ipynb"
+output_dir: null
+hypothesis: null
+conclusion: null
+notes: >
+  TBD
+status: "complete"
+last_updated: "2026-03-01"
+authors: ["Jeanette Mumford"]
