@@ -12,10 +12,11 @@
 <tr><th colspan="5"><strong>Time Series</strong></th></tr>
 <tr><td>ID</td><td>Description</td><td>Status</td><td>Results Files</td><td>Notes</td></tr>
 <tr><td>beta series analysis</td><td>Set up design matrices and contrasts for beta series analysis, and run the analysis on the included subjects and runs.  Assess the results for outliers.</td><td>completed</td><td><a href="../analyses/beta_series_analysis/figures/design_matrix_assessment.pdf">/figures/design_matrix_assessment.pdf</a>, <a href="../analyses/beta_series_analysis/subject_lists/vif_gt_5.csv">subject_lists/vif_gt_5.csv</a>, <a href="../analyses/beta_series_analysis/beta_series_analysis_code_dev.ipynb">beta_series_analysis_code_dev.ipynb</a>, <a href="../analyses/beta_series_analysis/qa_design_matrices.ipynb">qa_design_matrices.ipynb</a>, <a href="../analyses/beta_series_analysis/qa_analysis_output.ipynb">qa_analysis_output.ipynb</a></td><td>TBD</td></tr>
-<tr><td>traditional model analysis</td><td>Set up design matrices and contrasts for the traditional model, and run the analysis on the included subjects and runs. Assess the results for outliers.</td><td>in progress</td><td><a href="../analyses/traditional_model_analysis/model_code_dev.ipynb">model_code_dev.ipynb</a>, <a href="../analyses/traditional_model_analysis/qa_analysis_output.ipynb">qa_analysis_output.ipynb</a></td><td>TBD</td></tr>
+<tr><td>traditional model analysis</td><td>Set up design matrices and contrasts for the traditional model, and run the analysis on the included subjects and runs. Assess the results for outliers.</td><td>completed</td><td><a href="../analyses/traditional_model_analysis/model_code_dev.ipynb">model_code_dev.ipynb</a>, <a href="../analyses/traditional_model_analysis/qa_analysis_output.ipynb">qa_analysis_output.ipynb</a></td><td>TBD</td></tr>
 <tr><th colspan="5"><strong>Time Series And Group</strong></th></tr>
 <tr><td>ID</td><td>Description</td><td>Status</td><td>Results Files</td><td>Notes</td></tr>
-<tr><td>mvpa value decoding josh rois</td><td>MVPA value decoding using Josh ROIs, including data prep and aggregated results.</td><td>in progress</td><td><a href="../analyses/mvpa_value_decoding/mvpa_josh_rois/mvpa_josh_rois_prep.ipynb">mvpa_josh_rois_prep.ipynb</a>, <a href="../analyses/mvpa_value_decoding/mvpa_josh_rois/mvpa_josh_rois_aggregate_results.ipynb">mvpa_josh_rois_aggregate_results.ipynb</a></td><td>TBD</td></tr>
+<tr><td>mvpa value decoding josh rois</td><td>MVPA value decoding using Josh ROIs, including data prep and aggregated results.</td><td>complete</td><td><a href="../analyses/mvpa_value_decoding/mvpa_josh_rois/mvpa_josh_rois_prep.ipynb">mvpa_josh_rois_prep.ipynb</a>, <a href="../analyses/mvpa_value_decoding/mvpa_josh_rois/mvpa_josh_rois_aggregate_results.ipynb">mvpa_josh_rois_aggregate_results.ipynb</a></td><td>TBD</td></tr>
+<tr><td>mvpa value decoding schaefer rois</td><td>MVPA value decoding using Schaefer ROIs, including aggregated results.</td><td>complete</td><td><a href="../analyses/mvpa_value_decoding/schaefer_rois/mvpa_schaefer_aggregate_results.ipynb">mvpa_schaefer_aggregate_results.ipynb</a></td><td>TBD</td></tr>
 <tr><th colspan="5"><strong>Group</strong></th></tr>
 <tr><td>ID</td><td>Description</td><td>Status</td><td>Results Files</td><td>Notes</td></tr>
 <tr><td>ll ss group model comparison</td><td>Group-level comparisons for LL vs SS effects using summary outputs and QA notebooks.</td><td>in progress</td><td><a href="../analyses/ll_ss_group_model_comparison/accept_minus_reject_individual_run_comparison.ipynb">accept_minus_reject_individual_run_comparison.ipynb</a>, <a href="../analyses/ll_ss_group_model_comparison/accept_reject_group_comparison.ipynb">accept_reject_group_comparison.ipynb</a></td><td>TBD</td></tr>
@@ -167,8 +168,8 @@
 **Hypothesis:** None<br>
 **Conclusion:** None<br>
 **Notes:** TBD<br>
-**Status:** in progress<br>
-**Last Updated:** 2026-02-13<br>
+**Status:** completed<br>
+**Last Updated:** 2026-02-28<br>
 **Authors:** Jeanette Mumford<br>
 
 ---
@@ -195,7 +196,31 @@
 **Hypothesis:** None<br>
 **Conclusion:** None<br>
 **Notes:** TBD<br>
-**Status:** in progress<br>
+**Status:** complete<br>
+**Last Updated:** 2026-02-28<br>
+**Authors:** Jeanette Mumford<br>
+
+---
+
+### mvpa_value_decoding_schaefer_rois
+**Name:** MVPA value decoding (Schaefer ROIs)<br>
+**Description:** MVPA value decoding using Schaefer ROIs, including aggregated results.<br>
+**Code Directory:** analyses/mvpa_value_decoding/schaefer_rois<br>
+**Dependencies:** None<br>
+**Script Entry:**
+- run_mvpa.py
+- submit_run_schaefer_rois.sh
+
+**Notebook Entry:**
+- mvpa_schaefer_aggregate_results.ipynb
+
+**Other Files:** None<br>
+**Output Directory:** None<br>
+**Results Files:** <a href="../analyses/mvpa_value_decoding/schaefer_rois/mvpa_schaefer_aggregate_results.ipynb">mvpa_schaefer_aggregate_results.ipynb</a><br>
+**Hypothesis:** None<br>
+**Conclusion:** None<br>
+**Notes:** TBD<br>
+**Status:** complete<br>
 **Last Updated:** 2026-02-28<br>
 **Authors:** Jeanette Mumford<br>
 

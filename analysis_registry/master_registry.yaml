@@ -201,7 +201,33 @@
   notes: 'TBD
 
     '
-  status: in progress
+  status: complete
+  last_updated: '2026-02-28'
+  authors:
+  - Jeanette Mumford
+- id: mvpa_value_decoding_schaefer_rois
+  name: MVPA value decoding (Schaefer ROIs)
+  stage: time series and group
+  description: 'MVPA value decoding using Schaefer ROIs, including aggregated results.
+
+    '
+  code_dir: analyses/mvpa_value_decoding/schaefer_rois
+  dependencies: []
+  script_entry:
+  - run_mvpa.py
+  - submit_run_schaefer_rois.sh
+  notebook_entry:
+  - mvpa_schaefer_aggregate_results.ipynb
+  other_files: null
+  results_files:
+  - mvpa_schaefer_aggregate_results.ipynb
+  output_dir: null
+  hypothesis: null
+  conclusion: null
+  notes: 'TBD
+
+    '
+  status: complete
   last_updated: '2026-02-28'
   authors:
   - Jeanette Mumford
@@ -230,7 +256,7 @@
   notes: 'TBD
 
     '
-  status: in progress
-  last_updated: '2026-02-13'
+  status: completed
+  last_updated: '2026-02-28'
   authors:
   - Jeanette Mumford
