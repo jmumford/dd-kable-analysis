@@ -29,7 +29,13 @@ def parse_args():
         '--atlas',
         type=str,
         required=True,
-        choices=['josh_orig', 'schaefer200', 'schaefer400'],
+        choices=[
+            'josh_orig',
+            'schaefer200',
+            'schaefer400',
+            'harvard_oxford_subcort',
+            'pauli_rois',
+        ],
         help='Which ROI set to use.',
     )
     p.add_argument(
@@ -82,15 +88,26 @@ def resolve_atlas(cfg: Any, atlas: str, atlas_path: str | None) -> Tuple[Any, st
 
     if atlas in ('schaefer200', 'schaefer400'):
         n_rois = 200 if atlas == 'schaefer200' else 400
-        # Schaefer 2018 returns a dict-like bunch with 'maps' being the label image
         sch = datasets.fetch_atlas_schaefer_2018(
             n_rois=n_rois, yeo_networks=7, resolution_mm=2
         )
-        # sch.maps is a filepath to the label NIfTI
         return (
             sch.maps,
             f'nilearn.fetch_atlas_schaefer_2018(n_rois={n_rois}, networks=7, res=2mm)',
         )
+
+    if atlas == 'harvard_oxford_subcort':
+        ho = datasets.fetch_atlas_harvard_oxford('sub-maxprob-thr25-2mm')
+        return ho.maps, "nilearn.fetch_atlas_harvard_oxford('sub-maxprob-thr25-2mm')"
+
+    if atlas == 'pauli_rois':
+        pauli_dir = (
+            Path(cfg.masks_dir) / 'pauli_subcort_rois_neurovault_collection_3145'
+        )
+        ap = pauli_dir / 'pauli_roi_atlas_thr0.50_to-groupmask.nii.gz'
+        if not ap.exists():
+            raise FileNotFoundError(f'Missing Pauli atlas: {ap}')
+        return str(ap), str(ap)
 
     raise ValueError(f'Unknown atlas: {atlas}')
 
