@@ -1,0 +1,25 @@
+id: mvpa_value_decoding_subject_list
+name: MVPA value decoding subject list
+stage: preprocessing
+description: >
+  Creates and verifies the mvpa_subject_list.txt file, which is
+  used in the MVPA value decoding analyses to specify which subjects to include.
+code_dir: "analyses/mvpa_value_decoding/subject_lists"
+dependencies:
+  - "initial_qa_pass_and_mask_pass_subjects_runs.csv"
+script_entry: null
+notebook_entry:
+  - "make_mvpa_subject_list.ipynb"
+other_files: null
+results_files:
+  - "make_mvpa_subject_list.ipynb"
+  - "mvpa_subject_list.txt"
+output_dir: null
+hypothesis: null
+conclusion: null
+notes: >
+  This notebook re-establishes provenance for mvpa_subject_list.txt, which
+  was originally created in sandbox (not tracked by GitHub).
+status: "complete"
+last_updated: "2026-04-07"
+authors: ["Jeanette Mumford"]

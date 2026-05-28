@@ -16,6 +16,7 @@ from dd_kable_analysis.mvpa.data import (
 )
 from dd_kable_analysis.mvpa.decode import (
     decode_subject_atlas_rois,
+    decode_subject_atlas_rois_clf,
     roi_scores_to_atlas_image,
 )
 from dd_kable_analysis.mvpa.features import (
@@ -26,7 +27,10 @@ from dd_kable_analysis.mvpa.features import (
     make_roi_column_index_map,
     prepare_subject_for_atlas_mvpa,
 )
-from dd_kable_analysis.mvpa.models import nested_groupcv_ridge_predict
+from dd_kable_analysis.mvpa.models import (
+    nested_groupcv_logreg_predict,
+    nested_groupcv_ridge_predict,
+)
 
 __all__ = [
     'load_initial_and_vif_tables',
@@ -34,6 +38,7 @@ __all__ = [
     'get_subject_good_runs',
     'SubjectBehavBoldResult',
     'build_subject_behav_bold_df',
+    'nested_groupcv_logreg_predict',
     'nested_groupcv_ridge_predict',
     'VoxelFilterInfo',
     'filter_voxels_runaware',
@@ -41,6 +46,7 @@ __all__ = [
     'extract_subject_global_Xy_groups',
     'make_roi_column_index_map',
     'prepare_subject_for_atlas_mvpa',
+    'decode_subject_atlas_rois_clf',
     'decode_subject_atlas_rois',
     'roi_scores_to_atlas_image',
     'SubjectMVPAFeatureCache',

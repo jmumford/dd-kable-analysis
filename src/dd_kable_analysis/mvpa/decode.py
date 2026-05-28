@@ -5,6 +5,7 @@ High-level decoding routines.
 
 This module contains:
 - subject-level atlas ROI decoding (nested group CV ridge regression)
+- subject-level atlas ROI decoding for binary choice classification
 - helper to paint ROI-level scores back into an atlas image for visualization
 """
 
@@ -19,7 +20,10 @@ from dd_kable_analysis.mvpa.features import (
     filter_voxels_runaware,
     prepare_subject_for_atlas_mvpa,
 )
-from dd_kable_analysis.mvpa.models import nested_groupcv_ridge_predict
+from dd_kable_analysis.mvpa.models import (
+    nested_groupcv_logreg_predict,
+    nested_groupcv_ridge_predict,
+)
 
 
 def decode_subject_atlas_rois(
@@ -187,6 +191,189 @@ def decode_subject_atlas_rois(
                 rmse=float(info['rmse']),
                 mean_alpha=float(np.mean(info['chosen_alphas']))
                 if len(info['chosen_alphas'])
+                else np.nan,
+            )
+        )
+
+    roi_summary_df = (
+        pd.DataFrame(rows).sort_values(['roi_label']).reset_index(drop=True)
+    )
+
+    if return_trialwise:
+        trialwise_df = (
+            pd.concat(trialwise_parts, ignore_index=True)
+            if len(trialwise_parts)
+            else pd.DataFrame()
+        )
+        return roi_summary_df, trialwise_df
+
+    return roi_summary_df
+
+
+def decode_subject_atlas_rois_clf(
+    cfg: Any,
+    sub_id: str,
+    *,
+    atlas_img: str | Path | Any,
+    y_col: str = 'choseAccept',
+    beta_col: str = 'beta_file',
+    group_col: str = 'run',
+    min_voxels_per_roi: int = 50,
+    small_thr: float = 1e-4,
+    max_small_frac: float = 0.05,
+    require_all_runs: bool = True,
+    Cs: np.ndarray | None = None,
+    verbose: bool = True,
+    return_trialwise: bool = False,
+    trialwise_rois: set[int] | None = None,
+) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Decode a binary behavioral variable from beta-series patterns within atlas ROIs.
+
+    For each ROI label in `atlas_img`, this function:
+      1) extracts trial × voxel data from that ROI
+      2) applies run-aware voxel QC
+      3) runs nested group CV logistic classification (leave-one-run-out outer CV)
+      4) stores out-of-sample classification metrics and optional trialwise outputs
+
+    Parameters
+    ----------
+    cfg
+        Analysis config object (used by build_subject_behav_bold_df and to locate masks).
+    sub_id
+        Subject ID string.
+    atlas_img
+        3D integer label atlas (path or Nifti1Image).
+    y_col
+        Column name in the behavioral/design table to decode. Must be binary 0/1.
+    beta_col
+        Column name containing beta NIfTI file paths (usually "beta_file").
+    group_col
+        Column name defining CV grouping (usually "run").
+    min_voxels_per_roi
+        Skip ROIs with fewer than this many voxels (pre- or post-QC).
+    small_thr, max_small_frac, require_all_runs
+        Parameters for run-aware voxel QC (`filter_voxels_runaware`).
+    Cs
+        Logistic regression C grid for nested CV. If None, uses model default.
+    verbose
+        If True, prints trial/run QA information during subject table creation and prep.
+    return_trialwise
+        If True, also return a trialwise DataFrame with out-of-sample probabilities/predictions.
+    trialwise_rois
+        If return_trialwise=True, restrict trialwise output to these ROI labels.
+        If None and return_trialwise=True, a ValueError is raised to prevent huge outputs.
+
+    Returns
+    -------
+    roi_summary_df
+        DataFrame with one row per ROI that passes voxel thresholds. Columns include:
+        sub_id, roi_label, n_trials, n_runs, n_vox_preQC, n_vox_postQC,
+        sensitivity, specificity, balanced_accuracy, roc_auc, log_loss, mean_C.
+    (roi_summary_df, trialwise_df)
+        If return_trialwise=True, also returns trialwise_df with columns like:
+        sub_id, roi_label, run, [trial_type/Delay/amount/choseAccept if present], y,
+        p_hat, y_pred.
+    """
+    if return_trialwise and trialwise_rois is None:
+        raise ValueError(
+            'return_trialwise=True with trialwise_rois=None will generate a huge '
+            'trialwise table (trials × all ROIs). Pass trialwise_rois (set of ints).'
+        )
+
+    out = build_subject_behav_bold_df(cfg, sub_id=sub_id, verbose=verbose)
+    behav_bold_df = out.behav_bold_df
+
+    prep = prepare_subject_for_atlas_mvpa(
+        behav_bold_df,
+        atlas_img=atlas_img,
+        cfg=cfg,
+        y_col=y_col,
+        beta_col=beta_col,
+        group_col=group_col,
+        standardize_X=False,
+        verbose=verbose,
+    )
+
+    rows: list[dict[str, Any]] = []
+    trialwise_parts: list[pd.DataFrame] = []
+
+    for roi_label, cols in prep.roi_to_cols.items():
+        if cols.size == 0:
+            continue
+
+        X_roi = prep.X_all[:, cols]
+        n_vox_pre = int(X_roi.shape[1])
+        if n_vox_pre < min_voxels_per_roi:
+            continue
+
+        try:
+            X_roi_f, _qc = filter_voxels_runaware(
+                X_roi,
+                prep.groups,
+                small_thr=small_thr,
+                max_small_frac=max_small_frac,
+                require_all_runs=require_all_runs,
+                verbose=False,
+            )
+        except RuntimeError:
+            continue
+
+        n_vox_post = int(X_roi_f.shape[1])
+        if n_vox_post < min_voxels_per_roi:
+            continue
+
+        y_prob, y_pred, info = nested_groupcv_logreg_predict(
+            X_roi_f,
+            prep.y,
+            prep.groups,
+            Cs=Cs,
+            verbose=False,
+        )
+
+        if return_trialwise and (
+            trialwise_rois is None or int(roi_label) in trialwise_rois
+        ):
+            df_tw = prep.df_used.copy().reset_index(drop=True)
+
+            if 'run' in df_tw.columns:
+                df_tw['run'] = df_tw['run'].astype(str)
+
+            df_tw['sub_id'] = str(sub_id)
+            df_tw['roi_label'] = int(roi_label)
+            df_tw['y'] = prep.y.astype(int)
+            df_tw['p_hat'] = y_prob
+            df_tw['y_pred'] = y_pred
+
+            extra_cols = [
+                c
+                for c in ['trial_type', 'Delay', 'amount', 'choseAccept']
+                if c in df_tw.columns
+            ]
+            cols_tw = (
+                ['sub_id', 'roi_label', 'run'] + extra_cols + ['y', 'p_hat', 'y_pred']
+            )
+            cols_tw = [c for c in cols_tw if c in df_tw.columns]
+            trialwise_parts.append(df_tw[cols_tw])
+
+        rows.append(
+            dict(
+                sub_id=str(sub_id),
+                roi_label=int(roi_label),
+                n_trials=int(len(prep.y)),
+                n_runs=int(len(np.unique(prep.groups))),
+                n_vox_preQC=n_vox_pre,
+                n_vox_postQC=n_vox_post,
+                sensitivity=float(info['sensitivity']),
+                specificity=float(info['specificity']),
+                balanced_accuracy=float(info['balanced_accuracy']),
+                accuracy=float(info['accuracy']),
+                roc_auc=float(info['roc_auc'])
+                if np.isfinite(info['roc_auc'])
+                else np.nan,
+                log_loss=float(info['log_loss']),
+                mean_C=float(np.mean(info['chosen_Cs']))
+                if len(info['chosen_Cs'])
                 else np.nan,
             )
         )
