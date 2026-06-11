@@ -1,0 +1,58 @@
+#!/bin/bash
+#SBATCH --job-name=beta_series_no_rt
+#SBATCH --output=/oak/stanford/groups/russpold/users/buckholtz/DD_Kable/scripts/dd-kable-analysis/logs/beta_series_no_rt_%A_%a.out
+#SBATCH --error=/oak/stanford/groups/russpold/users/buckholtz/DD_Kable/scripts/dd-kable-analysis/logs/beta_series_no_rt_%A_%a.err
+#SBATCH --time=4:00:00
+#SBATCH --mem=16G
+#SBATCH --cpus-per-task=1
+#SBATCH --partition=russpold
+#SBATCH --array=1-454%10
+
+echo "======================================================================"
+echo "SLURM Job ID: ${SLURM_JOB_ID}"
+echo "SLURM Array Task ID: ${SLURM_ARRAY_TASK_ID}"
+echo "Running on node: $(hostname)"
+echo "Starting at: $(date)"
+echo "======================================================================"
+
+PROJECT_ROOT="/oak/stanford/groups/russpold/users/buckholtz/DD_Kable/scripts/dd-kable-analysis"
+SCRIPT_DIR="${PROJECT_ROOT}/analyses/beta_series_analysis_no_rt"
+GOOD_SUBS_CSV="/oak/stanford/groups/russpold/users/buckholtz/DD_Kable/subject_lists/initial_qa_pass_and_mask_pass_subjects_runs.csv"
+
+UV_SETUP="$PROJECT_ROOT/setup_uv_sherlock.sh"
+source $UV_SETUP
+
+LINE=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" ${GOOD_SUBS_CSV})
+
+SUB_ID=$(echo $LINE | cut -d',' -f1)
+SESSION=$(echo $LINE | cut -d',' -f2)
+RUN=$(echo $LINE | cut -d',' -f3)
+
+if [ -z "${SUB_ID}" ] || [ -z "${RUN}" ]; then
+    echo "ERROR: Could not parse sub_id and run from CSV"
+    echo "Line ${SLURM_ARRAY_TASK_ID}: ${LINE}"
+    exit 1
+fi
+
+echo ""
+echo "Processing:"
+echo "  Subject: ${SUB_ID}"
+echo "  Session: ${SESSION}"
+echo "  Run: ${RUN}"
+echo ""
+
+uv --directory "$PROJECT_ROOT" run "${SCRIPT_DIR}/run_beta_series_no_rt.py" "$SUB_ID" "$RUN"
+
+EXIT_STATUS=$?
+
+echo ""
+echo "======================================================================"
+if [ ${EXIT_STATUS} -eq 0 ]; then
+    echo "SUCCESS: Analysis completed for sub-${SUB_ID}, run ${RUN}"
+else
+    echo "FAILED: Analysis failed for sub-${SUB_ID}, run ${RUN} (exit code: ${EXIT_STATUS})"
+fi
+echo "Finished at: $(date)"
+echo "======================================================================"
+
+exit ${EXIT_STATUS}

@@ -120,6 +120,7 @@ def build_beta_map_qa_pdf(
     fwhm: Optional[float] = None,
     gc_every: int = 10,
     verbose: bool = True,
+    beta_series_subdir: str = 'beta_series',
 ) -> dict:
     """
     Create a PDF with one page per subject/run grid QA figure.
@@ -136,7 +137,7 @@ def build_beta_map_qa_pdf(
         good_subs = good_subs.head(int(max_runs))
 
     if output_pdf is None:
-        figures_dir = Path(cfg.output_root) / 'beta_series' / 'figures'
+        figures_dir = Path(cfg.output_root) / beta_series_subdir / 'figures'
         output_pdf = figures_dir / 'beta_map_qa.pdf'
 
     output_pdf = Path(output_pdf)
@@ -156,7 +157,7 @@ def build_beta_map_qa_pdf(
 
             output_dir = (
                 Path(cfg.output_root)
-                / 'beta_series'
+                / beta_series_subdir
                 / 'first_level'
                 / f'sub-{sub_id}'
                 / 'contrast_estimates'

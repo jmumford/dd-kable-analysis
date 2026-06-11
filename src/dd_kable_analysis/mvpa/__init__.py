@@ -14,6 +14,10 @@ from dd_kable_analysis.mvpa.data import (
     load_initial_and_vif_tables,
     make_high_vif_trial_set,
 )
+from dd_kable_analysis.mvpa.atlas import (
+    get_roi_labels_from_atlas_img,
+    resolve_atlas,
+)
 from dd_kable_analysis.mvpa.decode import (
     decode_subject_atlas_rois,
     decode_subject_atlas_rois_clf,
@@ -33,6 +37,8 @@ from dd_kable_analysis.mvpa.models import (
 )
 
 __all__ = [
+    'get_roi_labels_from_atlas_img',
+    'resolve_atlas',
     'load_initial_and_vif_tables',
     'make_high_vif_trial_set',
     'get_subject_good_runs',

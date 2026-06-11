@@ -33,6 +33,8 @@ def parse_args():
     p.add_argument('--max-small-frac', type=float, default=0.05)
     p.add_argument('--require-all-runs', action='store_true', default=True)
     p.add_argument('--no-require-all-runs', dest='require_all_runs', action='store_false')
+    p.add_argument('--beta-series-dir', type=str, default='beta_series',
+                   help='Subdirectory under output_root containing beta series images.')
     p.add_argument('--verbose', action='store_true', default=False)
     return p.parse_args()
 
@@ -67,6 +69,7 @@ def main():
         verbose=args.verbose,
         return_trialwise=True,
         trialwise_rois=roi_labels,
+        beta_series_subdir=args.beta_series_dir,
     )
 
     roi_summary_path = sub_dir / 'roi_summary.csv'
@@ -74,7 +77,9 @@ def main():
     roi_summary_df.to_csv(roi_summary_path, index=False)
     trialwise_df.to_csv(trialwise_path, index=False)
 
-    qc = build_subject_behav_bold_df(cfg, sub_id=sub_id, y_col=args.y_col, verbose=False, strict=True)
+    qc = build_subject_behav_bold_df(cfg, sub_id=sub_id, y_col=args.y_col,
+                                     beta_series_subdir=args.beta_series_dir,
+                                     verbose=False, strict=True)
     meta = {
         'sub_id': str(sub_id),
         'atlas': args.atlas,

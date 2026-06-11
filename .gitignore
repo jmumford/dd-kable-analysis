@@ -9,6 +9,7 @@ garbage/
 # ignore the temporary directory where we're storing code that needs refactoring
 analyses/sandbox/
 
+analyses/mvpa_value_decoding/noise_assessment/results/
 
 # ignore the .venv 
 .venv/

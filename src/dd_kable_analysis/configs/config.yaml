@@ -2,7 +2,7 @@ data_root: /oak/stanford/groups/russpold/users/buckholtz/DD_Kable
 fmriprep_dir: /oak/stanford/groups/russpold/users/buckholtz/DD_Kable/derivatives/fmriprep
 bids_dir: /oak/stanford/groups/russpold/users/buckholtz/DD_Kable/bids/ds002843
 subject_lists: /oak/stanford/groups/russpold/users/buckholtz/DD_Kable/subject_lists
-output_root: /oak/stanford/groups/russpold/users/buckholtz/DD_Kable/derivatives/analysis_output
+output_root: /oak/stanford/groups/russpold/users/buckholtz/DD_Kable/derivatives/analysis_results
 # These three fields are used together to build the file path pattern for locating BOLD fMRI data.
 # Because session numbers can vary, we use wildcards ("ses*") in the folder path.
 # The expected data files are located under each subject's directory, in:

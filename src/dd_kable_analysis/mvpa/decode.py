@@ -42,6 +42,7 @@ def decode_subject_atlas_rois(
     verbose: bool = True,
     return_trialwise: bool = False,
     trialwise_rois: set[int] | None = None,
+    beta_series_subdir: str = 'beta_series',
 ) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
     """
     Decode a behavioral variable from beta-series patterns within atlas ROIs (per subject).
@@ -103,7 +104,13 @@ def decode_subject_atlas_rois(
         )
 
     # 1) build df of behavior + beta files (one row per trial)
-    out = build_subject_behav_bold_df(cfg, sub_id=sub_id, verbose=verbose)
+    out = build_subject_behav_bold_df(
+        cfg,
+        sub_id=sub_id,
+        y_col=y_col,
+        beta_series_subdir=beta_series_subdir,
+        verbose=verbose,
+    )
     behav_bold_df = out.behav_bold_df
 
     # 2) global extraction + ROI mapping
@@ -281,7 +288,12 @@ def decode_subject_atlas_rois_clf(
             'trialwise table (trials × all ROIs). Pass trialwise_rois (set of ints).'
         )
 
-    out = build_subject_behav_bold_df(cfg, sub_id=sub_id, verbose=verbose)
+    out = build_subject_behav_bold_df(
+        cfg,
+        sub_id=sub_id,
+        y_col=y_col,
+        verbose=verbose,
+    )
     behav_bold_df = out.behav_bold_df
 
     prep = prepare_subject_for_atlas_mvpa(

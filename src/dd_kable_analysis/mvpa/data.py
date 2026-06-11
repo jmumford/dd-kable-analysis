@@ -13,6 +13,7 @@ enforces minimum runs/trials-per-run requirements.
 """
 
 from dataclasses import dataclass
+from glob import glob
 from pathlib import Path
 from typing import Any
 
@@ -127,16 +128,140 @@ class SubjectBehavBoldResult:
     n_trials_after_vif_and_missing: int
     n_missing_betas: int
     n_high_vif_omitted: int
+    n_missing_sv_rows: int = 0
     trials_kept_by_run: dict[str, int] | None = None
     runs_passing_trial_threshold: list[str] | None = None
+
+
+def _is_sv_target(y_col: str) -> bool:
+    return y_col in {'SV_LL', 'SV_chosen', 'SV_unchosen', 'SV_SS', 'DV'}
+
+
+def _run_to_token(run: str) -> str:
+    try:
+        return f'run-{int(float(str(run))):02d}'
+    except ValueError:
+        return f'run-{run}'
+
+
+def _find_sv_file(cfg: Any, sub_id: str, run: str, sv_dirname: str) -> Path | None:
+    sv_root = Path(cfg.output_root) / sv_dirname
+    sub_label = str(sub_id).replace('sub-', '')
+    sub_dir = sv_root / f'sub-{sub_label}'
+
+    if not sub_dir.exists():
+        return None
+
+    run_token = _run_to_token(run)
+    patterns = [
+        sub_dir
+        / 'ses-*'
+        / 'func'
+        / f'sub-{sub_label}_ses-*_task-dd_{run_token}_desc-subjectivevalue_events.tsv',
+        sub_dir
+        / 'func'
+        / f'sub-{sub_label}_task-dd_{run_token}_desc-subjectivevalue_events.tsv',
+    ]
+
+    matches: list[str] = []
+    for pat in patterns:
+        matches.extend(glob(str(pat)))
+
+    if len(matches) == 0:
+        return None
+    if len(matches) > 1:
+        raise ValueError(
+            f'Multiple SV derivative files found for sub-{sub_label}, run={run}: {matches}'
+        )
+
+    return Path(matches[0])
+
+
+def _merge_subjective_value_columns(
+    behav_bold_run: pd.DataFrame,
+    cfg: Any,
+    sub_id: str,
+    run: str,
+    *,
+    y_col: str,
+    sv_dirname: str,
+    strict: bool,
+    verbose: bool,
+) -> tuple[pd.DataFrame, int]:
+    """
+    Merge subjective-value columns onto a single subject/run trial table.
+
+    The merge is keyed by rounded onset, because the SV derivative files are
+    generated separately from the BIDS events tables but should align trial by
+    trial within each run.
+
+    Returns
+    -------
+    behav_bold_run
+        Input table with the subjective-value columns merged in when available.
+    n_missing_sv_rows
+        Number of rows missing the requested target column after merge.
+    """
+    sv_file = _find_sv_file(cfg, sub_id=sub_id, run=str(run), sv_dirname=sv_dirname)
+
+    if sv_file is None:
+        msg = (
+            f'[{sub_id}] missing subjective-value derivative file for run {run} '
+            f'under output_root/{sv_dirname}.'
+        )
+        if strict:
+            raise ValueError(msg)
+        if verbose:
+            print('WARNING:', msg)
+        return behav_bold_run.iloc[0:0].copy(), 0
+
+    sv_df = pd.read_csv(sv_file, sep='\t')
+    if 'onset' not in sv_df.columns:
+        raise ValueError(f'Subjective-value file missing onset column: {sv_file}')
+
+    behav_bold_run = behav_bold_run.copy()
+    sv_df = sv_df.copy()
+
+    behav_bold_run['_onset_key'] = behav_bold_run['onset'].round(6)
+    sv_df['_onset_key'] = sv_df['onset'].round(6)
+
+    sv_cols = ['_onset_key', 'SV_LL', 'SV_chosen', 'SV_unchosen', 'SV_SS', 'DV']
+    sv_cols = [c for c in sv_cols if c in sv_df.columns]
+    sv_df = sv_df[sv_cols].drop_duplicates(subset=['_onset_key'], keep='first')
+
+    merged = behav_bold_run.merge(
+        sv_df,
+        on='_onset_key',
+        how='left',
+        validate='many_to_one',
+    ).drop(columns=['_onset_key'])
+
+    if y_col not in merged.columns:
+        raise ValueError(
+            f"SV merge finished but y_col='{y_col}' is absent for sub-{sub_id}, run={run}."
+        )
+
+    missing_this_run = int(merged[y_col].isna().sum())
+
+    if strict and missing_this_run > 0:
+        raise ValueError(
+            f'[{sub_id}] run {run} has {missing_this_run} missing {y_col} values '
+            'after subjective-value merge.'
+        )
+
+    merged = merged.dropna(subset=[y_col]).reset_index(drop=True)
+    return merged, missing_this_run
 
 
 def build_subject_behav_bold_df(
     cfg: Any,
     sub_id: str,
     *,
+    y_col: str = 'amount',
     min_runs_required: int = 3,
     min_trials_per_run: int = 20,
+    sv_dirname: str = 'subjective_value_estimates',
+    beta_series_subdir: str = 'beta_series',
     strict: bool = True,
     verbose: bool = True,
 ) -> SubjectBehavBoldResult:
@@ -159,10 +284,16 @@ def build_subject_behav_bold_df(
         Config object with paths (output_root, subject_lists, data_root).
     sub_id
         Subject identifier.
+    y_col
+        Target variable to decode. If this is one of the subjective-value targets
+        (`SV_LL`, `SV_chosen`, `SV_unchosen`, `SV_SS`, `DV`), subjective-value
+        derivative files are merged in by run and onset.
     min_runs_required
         Require at least this many usable runs.
     min_trials_per_run
         Require at least this many trials per run after omissions.
+    sv_dirname
+        Directory under cfg.output_root where per-run subjective-value files live.
     strict
         If True, raise ValueError when requirements are not met; otherwise warn.
     verbose
@@ -197,7 +328,7 @@ def build_subject_behav_bold_df(
 
     output_dir = (
         Path(cfg.output_root)
-        / 'beta_series'
+        / beta_series_subdir
         / 'first_level'
         / f'sub-{sub_id}'
         / 'contrast_estimates'
@@ -207,6 +338,7 @@ def build_subject_behav_bold_df(
     n_trials_before = 0
     n_missing_betas = 0
     n_high_vif_omitted = 0
+    n_missing_sv_rows = 0
     kept_by_run: dict[str, int] = {}
 
     for run in runs:
@@ -246,6 +378,19 @@ def build_subject_behav_bold_df(
             bold_df, on='trial_type', how='inner', validate='one_to_one'
         )
 
+        if _is_sv_target(y_col):
+            behav_bold_run, missing_this_run = _merge_subjective_value_columns(
+                behav_bold_run,
+                cfg,
+                sub_id,
+                run,
+                y_col=y_col,
+                sv_dirname=sv_dirname,
+                strict=strict,
+                verbose=verbose,
+            )
+            n_missing_sv_rows += missing_this_run
+
         kept_by_run[str(run)] = int(len(behav_bold_run))
         behav_bold_all.append(behav_bold_run)
 
@@ -261,6 +406,8 @@ def build_subject_behav_bold_df(
         print(f'[{sub_id}] trial regressors in design (pre-filter): {n_trials_before}')
         print(f'[{sub_id}] omitted high-VIF trials: {n_high_vif_omitted}')
         print(f'[{sub_id}] missing beta files: {n_missing_betas}')
+        if _is_sv_target(y_col):
+            print(f'[{sub_id}] missing subjective-value rows after merge: {n_missing_sv_rows}')
         print(f'[{sub_id}] kept trials (post-filter): {len(behav_bold_df)}')
         print(f'[{sub_id}] kept by run: {kept_by_run}')
         print(
@@ -296,6 +443,7 @@ def build_subject_behav_bold_df(
         n_trials_after_vif_and_missing=int(len(behav_bold_df)),
         n_missing_betas=int(n_missing_betas),
         n_high_vif_omitted=int(n_high_vif_omitted),
+        n_missing_sv_rows=int(n_missing_sv_rows),
         trials_kept_by_run=kept_by_run,
         runs_passing_trial_threshold=passing_runs,
     )

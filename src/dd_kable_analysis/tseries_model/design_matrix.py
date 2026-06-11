@@ -68,7 +68,7 @@ def get_frametimes(cfg: Config, sub_id: str, run: str) -> np.ndarray:
 
     TR = float(cfg.tr)
 
-    return np.arange(n_timepoints) * TR
+    return np.arange(n_timepoints) * TR + TR / 2
 
 
 def make_design_matrix(
@@ -109,7 +109,9 @@ def make_design_matrix(
     behav_data = load_tsv_data(behav_file)
 
     # Drop the last trial (max onset): too close to the end for all runs/subjects.
-    behav_data = behav_data.loc[behav_data['onset'] != behav_data['onset'].max()].reset_index(drop=True)
+    behav_data = behav_data.loc[
+        behav_data['onset'] != behav_data['onset'].max()
+    ].reset_index(drop=True)
 
     # --- Check for clipped trials ---
     clipped_mask = np.ceil(behav_data['onset']) >= frame_times[-1]
@@ -151,6 +153,58 @@ def make_design_matrix(
     )
 
     # --- Make design matrix ---
+    desmat = make_first_level_design_matrix(
+        frame_times,
+        events=events_model,
+        hrf_model='spm',
+        drift_model=None,
+        add_regs=confounds.values,
+        add_reg_names=confounds.columns.tolist(),
+    )
+
+    return behav_data, events_model, desmat
+
+
+def make_design_matrix_no_rt(
+    cfg: Config, sub_id: str, run: Union[int, str]
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Build a Nilearn first-level design matrix identical to make_design_matrix
+    but without the RT regressor.
+
+    Omitting RT avoids removing RT-correlated variance from trial-specific
+    beta estimates, which may improve decoding of variables that correlate
+    with RT (e.g., subjective value).
+    """
+    frame_times = get_frametimes(cfg, sub_id, run)
+    confounds = get_confounds(cfg, sub_id, run)
+
+    behav_file = resolve_file(cfg, sub_id, 'scan1', run, 'behav')
+    behav_data = load_tsv_data(behav_file)
+
+    behav_data = behav_data.loc[
+        behav_data['onset'] != behav_data['onset'].max()
+    ].reset_index(drop=True)
+
+    clipped_mask = np.ceil(behav_data['onset']) >= frame_times[-1]
+    n_clipped = clipped_mask.sum()
+    if n_clipped > 0:
+        msg = f'❌ {n_clipped} trial{"s" if n_clipped > 1 else ""} for sub {sub_id}, run {run} are clipped.'
+        if n_clipped == 1:
+            print(msg + ' Removing the trial and continuing.')
+            behav_data = behav_data.loc[~clipped_mask].reset_index(drop=True)
+        else:
+            raise RuntimeError(msg + ' Cannot generate design matrix.')
+
+    behav_data = behav_data.loc[~clipped_mask].reset_index(drop=True)
+    behav_data = behav_data.sort_values('onset').reset_index(drop=True)
+    behav_data['trial_num'] = behav_data.index
+    behav_data['trial_type'] = [f'trial{i:02d}' for i in behav_data['trial_num']]
+    rt_missing_mask = behav_data['RT'].isna()
+    behav_data.loc[rt_missing_mask, 'trial_type'] = 'no_response'
+
+    events_model = behav_data[['onset', 'duration', 'trial_type']].copy()
+
     desmat = make_first_level_design_matrix(
         frame_times,
         events=events_model,
