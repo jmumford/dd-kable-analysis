@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from dd_kable_analysis.mvpa.data import build_subject_behav_bold_df
+from dd_kable_analysis.mvpa.data_binned import SubjectBinnedData
 from dd_kable_analysis.mvpa.features import (
     filter_voxels_runaware,
     prepare_subject_for_atlas_mvpa,
@@ -23,6 +24,7 @@ from dd_kable_analysis.mvpa.features import (
 from dd_kable_analysis.mvpa.models import (
     nested_groupcv_logreg_predict,
     nested_groupcv_ridge_predict,
+    nested_loso_multiclass_logreg_predict,
 )
 
 
@@ -403,6 +405,234 @@ def decode_subject_atlas_rois_clf(
         return roi_summary_df, trialwise_df
 
     return roi_summary_df
+
+
+def decode_value_bins_by_delay(
+    subject_data: list[SubjectBinnedData],
+    delay_bin: int,
+    *,
+    n_value_bins: int = 3,
+    min_subjects_per_roi: int = 10,
+    min_voxels_per_subject: int = 20,
+    min_voxels_after_intersection: int = 20,
+    Cs: np.ndarray | None = None,
+    verbose: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Cross-subject LOSO multiclass decoding for one delay level.
+
+    For each ROI, stacks all subjects' value-bin-averaged patterns (from
+    build_subject_binned_roi_patterns) and runs leave-one-subject-out logistic
+    regression to classify which value tertile bin (A1/A2/A3) a pattern belongs to.
+
+    The cross-subject voxel intersection is applied per ROI: only voxels that
+    passed run-aware QC in every subject are used. This ensures consistent feature
+    ordering across subjects.
+
+    Parameters
+    ----------
+    subject_data
+        List of SubjectBinnedData, one per subject, from build_subject_binned_roi_patterns.
+    delay_bin
+        Delay tertile level to analyse (1, 2, or 3).
+    n_value_bins
+        Number of value bin classes (default 3 → A1, A2, A3).
+    min_subjects_per_roi
+        Skip ROIs with fewer valid subjects remaining after per-subject voxel filtering.
+    min_voxels_per_subject
+        Drop individual subjects from an ROI if their own run-aware QC left fewer than
+        this many valid voxels. Prevents a single subject with heavy dropout from
+        zeroing out the cross-subject voxel intersection for everyone else.
+    min_voxels_after_intersection
+        Skip ROIs where the cross-subject voxel intersection (after per-subject filtering)
+        has too few voxels.
+    Cs
+        C grid for inner logistic regression CV. If None, uses the model default.
+    verbose
+        Print per-ROI progress.
+
+    Returns
+    -------
+    roi_summary_df
+        One row per ROI. Columns:
+          roi_label, delay_bin, n_subjects, n_patterns, n_vox,
+          chance_level, accuracy, balanced_accuracy, mean_C,
+          precision_A1/recall_A1/f1_A1/auc_A1 … (per class).
+    subject_preds_df
+        One row per subject × value_bin. Columns:
+          sub_id, roi_label, delay_bin, value_bin, y_true, y_pred,
+          prob_A1/prob_A2/prob_A3.
+    confusion_df
+        Long-format confusion matrix. Columns:
+          roi_label, delay_bin, true_class, pred_class, count.
+    """
+    # Filter to subjects that have patterns for this delay bin
+    valid_subs = [sd for sd in subject_data if delay_bin in sd.roi_patterns]
+    n_valid = len(valid_subs)
+    if verbose:
+        print(f'[delay_bin={delay_bin}] {n_valid}/{len(subject_data)} subjects have data')
+
+    if n_valid < min_subjects_per_roi:
+        if verbose:
+            print(f'  Too few subjects ({n_valid}); returning empty DataFrames.')
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    # Collect all ROI labels that appear in any valid subject for this delay bin
+    all_roi_labels: set[int] = set()
+    for sd in valid_subs:
+        all_roi_labels.update(sd.roi_patterns[delay_bin].keys())
+
+    roi_summary_rows: list[dict[str, Any]] = []
+    subj_pred_rows: list[dict[str, Any]] = []
+    confusion_rows: list[dict[str, Any]] = []
+
+    for roi_label in sorted(all_roi_labels):
+        # Subjects with patterns AND valid-voxel mask for this ROI and delay bin
+        sub_pool_all = [
+            sd for sd in valid_subs
+            if roi_label in sd.roi_patterns.get(delay_bin, {})
+            and roi_label in sd.roi_valid_voxels
+        ]
+
+        # Drop subjects whose own QC left too few valid voxels for this ROI.
+        # This prevents a single dropout-heavy subject from zeroing the intersection.
+        sub_pool = [
+            sd for sd in sub_pool_all
+            if int(sd.roi_valid_voxels[roi_label].sum()) >= min_voxels_per_subject
+        ]
+        n_dropped_vox = len(sub_pool_all) - len(sub_pool)
+        if verbose and n_dropped_vox > 0:
+            print(
+                f'  ROI {roi_label}: dropped {n_dropped_vox} subject(s) with '
+                f'< {min_voxels_per_subject} valid voxels'
+            )
+
+        if len(sub_pool) < min_subjects_per_roi:
+            if verbose:
+                print(
+                    f'  ROI {roi_label}: only {len(sub_pool)} subjects after voxel filter, '
+                    f'need {min_subjects_per_roi}, skipping'
+                )
+            continue
+
+        # Verify consistent total voxel count (same atlas + group mask → should match)
+        n_vox_total_vals = set(
+            sd.n_vox_total[roi_label] for sd in sub_pool if roi_label in sd.n_vox_total
+        )
+        if len(n_vox_total_vals) > 1:
+            if verbose:
+                print(
+                    f'  ROI {roi_label}: inconsistent total voxel counts across subjects '
+                    f'{n_vox_total_vals}, skipping'
+                )
+            continue
+        n_vox_total = next(iter(n_vox_total_vals))
+
+        # Cross-subject voxel intersection: keep voxels valid in ALL subjects
+        common_mask = np.ones(n_vox_total, dtype=bool)
+        for sd in sub_pool:
+            common_mask &= sd.roi_valid_voxels[roi_label]
+
+        n_vox_common = int(common_mask.sum())
+        if n_vox_common < min_voxels_after_intersection:
+            if verbose:
+                print(
+                    f'  ROI {roi_label}: only {n_vox_common} voxels after intersection, '
+                    f'need {min_voxels_after_intersection}, skipping'
+                )
+            continue
+
+        # Build stacked X, y, groups for the LOSO CV
+        X_parts: list[np.ndarray] = []
+        y_parts: list[int] = []
+        grp_parts: list[str] = []
+
+        for sd in sub_pool:
+            patterns = sd.roi_patterns[delay_bin][roi_label]  # (n_value_bins, n_vox_total)
+            X_parts.append(patterns[:, common_mask].astype(float))  # (n_value_bins, n_vox_common)
+            y_parts.extend(range(1, n_value_bins + 1))
+            grp_parts.extend([str(sd.sub_id)] * n_value_bins)
+
+        X = np.vstack(X_parts)   # (n_subs * n_value_bins, n_vox_common)
+        y = np.array(y_parts, dtype=int)
+        groups = np.array(grp_parts)
+
+        if verbose:
+            print(
+                f'  ROI {roi_label}: n_subs={len(sub_pool)} '
+                f'X={X.shape} n_vox_common={n_vox_common}'
+            )
+
+        try:
+            y_proba, y_pred, info = nested_loso_multiclass_logreg_predict(
+                X, y, groups, Cs=Cs, verbose=False
+            )
+        except Exception as exc:
+            if verbose:
+                print(f'  ROI {roi_label}: model failed — {exc}')
+            continue
+
+        classes = info['classes']
+
+        # --- roi_summary row ---
+        row: dict[str, Any] = dict(
+            roi_label=int(roi_label),
+            delay_bin=int(delay_bin),
+            n_subjects=int(len(sub_pool)),
+            n_patterns=int(len(y)),
+            n_vox=int(n_vox_common),
+            chance_level=float(info['chance_level']),
+            accuracy=float(info['accuracy']),
+            balanced_accuracy=float(info['balanced_accuracy']),
+            mean_C=float(info['mean_C']),
+        )
+        for j, cls in enumerate(classes):
+            row[f'precision_A{cls}'] = float(info['precision'][j])
+            row[f'recall_A{cls}'] = float(info['recall'][j])
+            row[f'f1_A{cls}'] = float(info['f1'][j])
+            auc_val = info['auc_per_class'][j]
+            row[f'auc_A{cls}'] = float(auc_val) if np.isfinite(auc_val) else np.nan
+        roi_summary_rows.append(row)
+
+        # --- per-subject prediction rows ---
+        for i, sd in enumerate(sub_pool):
+            for v_idx in range(n_value_bins):
+                flat_i = i * n_value_bins + v_idx
+                pred_row: dict[str, Any] = dict(
+                    sub_id=str(sd.sub_id),
+                    roi_label=int(roi_label),
+                    delay_bin=int(delay_bin),
+                    value_bin=int(y[flat_i]),
+                    y_true=int(y[flat_i]),
+                    y_pred=int(y_pred[flat_i]),
+                )
+                for j, cls in enumerate(classes):
+                    pred_row[f'prob_A{cls}'] = float(y_proba[flat_i, j])
+                subj_pred_rows.append(pred_row)
+
+        # --- confusion matrix (long format) ---
+        cm = np.array(info['confusion_matrix'])
+        for ti, true_cls in enumerate(classes):
+            for pi, pred_cls in enumerate(classes):
+                confusion_rows.append(
+                    dict(
+                        roi_label=int(roi_label),
+                        delay_bin=int(delay_bin),
+                        true_class=int(true_cls),
+                        pred_class=int(pred_cls),
+                        count=int(cm[ti, pi]),
+                    )
+                )
+
+    roi_summary_df = (
+        pd.DataFrame(roi_summary_rows).sort_values('roi_label').reset_index(drop=True)
+        if roi_summary_rows
+        else pd.DataFrame()
+    )
+    subject_preds_df = pd.DataFrame(subj_pred_rows) if subj_pred_rows else pd.DataFrame()
+    confusion_df = pd.DataFrame(confusion_rows) if confusion_rows else pd.DataFrame()
+
+    return roi_summary_df, subject_preds_df, confusion_df
 
 
 def roi_scores_to_atlas_image(

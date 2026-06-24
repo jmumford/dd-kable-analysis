@@ -14,7 +14,14 @@ from typing import Any, Iterable
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import log_loss, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    confusion_matrix,
+    log_loss,
+    precision_recall_fscore_support,
+    roc_auc_score,
+)
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -517,3 +524,252 @@ def nested_groupcv_logreg_predict(
         )
 
     return y_prob_oos, y_pred_oos, info
+
+
+def nested_loso_multiclass_logreg_predict(
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    *,
+    Cs: Iterable[float] | None = None,
+    max_iter: int = 2000,
+    verbose: bool = True,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """
+    Nested leave-one-subject-out (LOSO) multiclass logistic classification.
+
+    Designed for cross-subject decoding where each subject contributes a fixed
+    number of patterns (one per class). All of a subject's patterns are held out
+    together in the outer CV.
+
+    Outer loop:
+      - GroupKFold with n_splits = n_unique_groups (leave-one-subject-out)
+      - All patterns from one subject form the test fold
+
+    Inner loop:
+      - GroupKFold within the outer training set
+      - Selects C by minimising multiclass log loss
+
+    Model: L2 logistic regression, one-vs-rest (OVR), LBFGS solver.
+
+    Parameters
+    ----------
+    X
+        Feature matrix of shape (n_samples, n_features).
+    y
+        Integer class labels of shape (n_samples,).
+    groups
+        Subject identifiers of shape (n_samples,). All rows sharing a group
+        label are held out together in the outer CV fold.
+    Cs
+        Candidate inverse regularisation strengths. If None, uses a log grid.
+    max_iter
+        Maximum LBFGS iterations.
+    verbose
+        Print fold progress.
+
+    Returns
+    -------
+    y_proba_oos
+        Out-of-sample predicted probabilities, shape (n_samples, n_classes).
+        Columns are ordered by sorted class label.
+    y_pred_oos
+        Out-of-sample hard predictions, shape (n_samples,).
+    info
+        Dict with keys:
+          n_samples, n_features, n_groups, n_classes, classes, chance_level,
+          accuracy, balanced_accuracy,
+          precision/recall/f1/support (lists, one entry per class),
+          auc_per_class (list),
+          confusion_matrix (n_classes × n_classes list-of-lists),
+          mean_C, chosen_Cs, c_grid, outer_folds.
+    """
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y)
+    groups = np.asarray(groups)
+
+    if not np.all(np.isfinite(X)):
+        raise ValueError('X contains non-finite values.')
+
+    classes = np.sort(np.unique(y))
+    n_classes = int(len(classes))
+    if n_classes < 2:
+        raise ValueError(f'Need >= 2 classes; found {n_classes}.')
+
+    uniq_groups = np.unique(groups)
+    n_groups = int(len(uniq_groups))
+    if n_groups < 3:
+        raise ValueError(
+            f'Need >= 3 subjects for nested LOSO; found {n_groups}: {uniq_groups}'
+        )
+
+    if Cs is None:
+        Cs = 10.0 ** np.linspace(-4, 4, 17)
+    Cs = np.asarray(list(Cs), dtype=float)
+
+    def make_pipe(C: float) -> Pipeline:
+        return Pipeline(
+            [
+                ('scaler', StandardScaler(with_mean=True, with_std=True)),
+                (
+                    'logreg',
+                    LogisticRegression(
+                        C=float(C),
+                        penalty='l2',
+                        solver='lbfgs',
+                        max_iter=max_iter,
+                    ),
+                ),
+            ]
+        )
+
+    outer_cv = GroupKFold(n_splits=n_groups)
+    y_proba_oos = np.full((len(y), n_classes), np.nan, dtype=float)
+    y_pred_oos = np.full(len(y), -1, dtype=int)
+
+    chosen_Cs: list[float] = []
+    outer_folds: list[dict[str, Any]] = []
+
+    for fold, (tr_idx, te_idx) in enumerate(
+        outer_cv.split(X, y, groups=groups), start=1
+    ):
+        te_groups = np.unique(groups[te_idx])
+        tr_groups = np.unique(groups[tr_idx])
+
+        if verbose:
+            print(
+                f'\n[outer {fold}/{n_groups}] test={te_groups}  '
+                f'n_train={len(tr_idx)} n_test={len(te_idx)}'
+            )
+
+        y_tr_outer = y[tr_idx]
+        if np.unique(y_tr_outer).size < n_classes:
+            raise RuntimeError(
+                f'Outer training fold {fold} is missing classes; '
+                f'found {np.unique(y_tr_outer)}, expected {classes}.'
+            )
+
+        inner_groups = groups[tr_idx]
+        inner_uniq = np.unique(inner_groups)
+        if len(inner_uniq) < 2:
+            raise RuntimeError('Inner CV needs >= 2 subjects in the outer training set.')
+
+        inner_cv = GroupKFold(n_splits=min(5, len(inner_uniq)))
+
+        mean_losses: list[float] = []
+        for C in Cs:
+            losses: list[float] = []
+            for tr2, va2 in inner_cv.split(X[tr_idx], y[tr_idx], groups=inner_groups):
+                tr = tr_idx[tr2]
+                va = tr_idx[va2]
+                if np.unique(y[tr]).size < 2:
+                    losses.append(np.inf)
+                    continue
+                pipe = make_pipe(float(C))
+                pipe.fit(X[tr], y[tr])
+                prob = pipe.predict_proba(X[va])
+                losses.append(float(log_loss(y[va], prob, labels=classes)))
+            mean_losses.append(float(np.mean(losses)))
+
+        best_C = float(Cs[int(np.argmin(mean_losses))])
+        chosen_Cs.append(best_C)
+
+        if verbose:
+            best_k = np.argsort(mean_losses)[:3]
+            print(f'  best C={best_C:.4g}')
+            print('  top inner (C, mean log_loss):')
+            for j in best_k:
+                print(f'    {Cs[j]:.4g}  {mean_losses[j]:.4g}')
+
+        pipe = make_pipe(best_C)
+        pipe.fit(X[tr_idx], y[tr_idx])
+        proba = pipe.predict_proba(X[te_idx])
+        pred = pipe.predict(X[te_idx])
+
+        # Align probability columns to the global sorted class order.
+        clf_classes = pipe.named_steps['logreg'].classes_
+        prob_aligned = np.zeros((len(te_idx), n_classes), dtype=float)
+        for j, cls in enumerate(clf_classes):
+            global_j = int(np.where(classes == cls)[0][0])
+            prob_aligned[:, global_j] = proba[:, j]
+
+        y_proba_oos[te_idx] = prob_aligned
+        y_pred_oos[te_idx] = pred
+
+        y_te = y[te_idx]
+        fold_acc = float(np.mean(pred == y_te))
+        fold_bal_acc = float(balanced_accuracy_score(y_te, pred))
+
+        outer_folds.append(
+            dict(
+                fold=int(fold),
+                test_groups=[str(g) for g in te_groups.tolist()],
+                best_C=float(best_C),
+                n_train=int(len(tr_idx)),
+                n_test=int(len(te_idx)),
+                accuracy=fold_acc,
+                balanced_accuracy=fold_bal_acc,
+            )
+        )
+
+        if verbose:
+            print(f'  outer test acc={fold_acc:.3f} bal_acc={fold_bal_acc:.3f}')
+
+    if not np.all(np.isfinite(y_proba_oos)):
+        raise RuntimeError('Some samples missing OOS probabilities. Check group splits.')
+    if np.any(y_pred_oos < 0):
+        raise RuntimeError('Some samples missing OOS hard predictions.')
+
+    # Overall metrics across all OOS predictions
+    acc = float(accuracy_score(y, y_pred_oos))
+    bal_acc = float(balanced_accuracy_score(y, y_pred_oos))
+    chance = float(1.0 / n_classes)
+
+    precision, recall, f1, support = precision_recall_fscore_support(
+        y, y_pred_oos, labels=classes, zero_division=0
+    )
+
+    cm = confusion_matrix(y, y_pred_oos, labels=classes)
+
+    auc_per_class: list[float] = []
+    for j, cls in enumerate(classes):
+        y_bin = (y == cls).astype(int)
+        if y_bin.sum() == 0 or (1 - y_bin).sum() == 0:
+            auc_per_class.append(np.nan)
+        else:
+            auc_per_class.append(float(roc_auc_score(y_bin, y_proba_oos[:, j])))
+
+    info: dict[str, Any] = dict(
+        n_samples=int(len(y)),
+        n_features=int(X.shape[1]),
+        n_groups=int(n_groups),
+        n_classes=int(n_classes),
+        classes=classes.tolist(),
+        chance_level=float(chance),
+        accuracy=float(acc),
+        balanced_accuracy=float(bal_acc),
+        precision=precision.tolist(),
+        recall=recall.tolist(),
+        f1=f1.tolist(),
+        support=support.tolist(),
+        auc_per_class=auc_per_class,
+        confusion_matrix=cm.tolist(),
+        mean_C=float(np.mean(chosen_Cs)),
+        chosen_Cs=chosen_Cs,
+        c_grid=Cs.tolist(),
+        outer_folds=outer_folds,
+    )
+
+    if verbose:
+        print(
+            f'\n[overall OOS] acc={acc:.3f} bal_acc={bal_acc:.3f} '
+            f'chance={chance:.3f}'
+        )
+        for j, cls in enumerate(classes):
+            auc_str = f'{auc_per_class[j]:.3f}' if np.isfinite(auc_per_class[j]) else 'nan'
+            print(
+                f'  class {cls}: P={precision[j]:.3f} R={recall[j]:.3f} '
+                f'F1={f1[j]:.3f} AUC={auc_str}'
+            )
+
+    return y_proba_oos, y_pred_oos, info

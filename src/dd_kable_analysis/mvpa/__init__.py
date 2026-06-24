@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from dd_kable_analysis.mvpa.data_binned import (
+    SubjectBinnedData,
+    assign_bin_labels,
+    build_subject_binned_roi_patterns,
+    compute_global_bin_edges,
+)
 from dd_kable_analysis.mvpa.cache import (
     SubjectMVPAFeatureCache,
     get_subject_cache_path,
@@ -21,6 +27,7 @@ from dd_kable_analysis.mvpa.atlas import (
 from dd_kable_analysis.mvpa.decode import (
     decode_subject_atlas_rois,
     decode_subject_atlas_rois_clf,
+    decode_value_bins_by_delay,
     roi_scores_to_atlas_image,
 )
 from dd_kable_analysis.mvpa.features import (
@@ -34,9 +41,16 @@ from dd_kable_analysis.mvpa.features import (
 from dd_kable_analysis.mvpa.models import (
     nested_groupcv_logreg_predict,
     nested_groupcv_ridge_predict,
+    nested_loso_multiclass_logreg_predict,
 )
 
 __all__ = [
+    'compute_global_bin_edges',
+    'assign_bin_labels',
+    'SubjectBinnedData',
+    'build_subject_binned_roi_patterns',
+    'nested_loso_multiclass_logreg_predict',
+    'decode_value_bins_by_delay',
     'get_roi_labels_from_atlas_img',
     'resolve_atlas',
     'load_initial_and_vif_tables',
